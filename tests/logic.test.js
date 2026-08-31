@@ -1,0 +1,211 @@
+/* Dependency-free checks for the tournament logic.  Run: node tests/logic.test.js */
+'use strict';
+
+const Model = require('../js/model.js');
+const Scheduler = require('../js/scheduler.js');
+const Standings = require('../js/standings.js');
+const Finals = require('../js/finals.js');
+
+let passed = 0;
+const failures = [];
+
+function check(label, condition, detail) {
+  if (condition) { passed += 1; return; }
+  failures.push(label + (detail ? ' — ' + detail : ''));
+}
+
+function roster(n) {
+  const players = [];
+  for (let i = 1; i <= n; i++) players.push(Model.createPlayer('Player ' + i));
+  return players;
+}
+
+/* A small deterministic RNG so a failure can be reproduced. */
+function seeded(seed) {
+  let s = seed >>> 0;
+  return function () {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+/* ------------------------------------------------------------- scheduling */
+
+for (let n = Model.MIN_PLAYERS; n <= Model.MAX_PLAYERS; n++) {
+  for (const courts of [1, 2, 3, 4]) {
+    const players = roster(n);
+    const settings = { courts: courts, rounds: 6, targetScore: 9, winBy: 1 };
+    const expectedGames = Model.gamesPerRound(n, courts);
+    if (expectedGames < 1) continue;
+
+    const schedule = Scheduler.generateSchedule(players, settings, seeded(n * 100 + courts));
+    const ids = players.map(function (p) { return p.id; });
+    const tag = n + ' players / ' + courts + ' courts';
+
+    check('rounds generated (' + tag + ')', schedule.length === 6);
+
+    schedule.forEach(function (round) {
+      const seen = [];
+      round.games.forEach(function (g) { seen.push.apply(seen, g.teamA.concat(g.teamB)); });
+      check('games per round (' + tag + ')', round.games.length === expectedGames);
+      check('nobody plays twice in a round (' + tag + ')', new Set(seen).size === seen.length);
+      check('everyone is placed (' + tag + ')',
+        seen.length + round.byes.length === n,
+        seen.length + ' playing + ' + round.byes.length + ' byes != ' + n);
+      check('byes do not overlap play (' + tag + ')',
+        round.byes.every(function (id) { return seen.indexOf(id) === -1; }));
+      check('court numbers are unique (' + tag + ')',
+        new Set(round.games.map(function (g) { return g.court; })).size === round.games.length);
+    });
+
+    const quality = Scheduler.scheduleQuality(schedule, ids);
+    check('sit-outs are shared evenly (' + tag + ')', quality.byeSpread <= 1,
+      'spread of ' + quality.byeSpread);
+
+    // With enough distinct players a six-round draw should never repeat a partner.
+    if (n >= 12) {
+      check('no repeat partners (' + tag + ')', quality.maxPartnerRepeats <= 1,
+        'a pair partnered ' + quality.maxPartnerRepeats + ' times');
+    }
+  }
+}
+
+check('too few players is rejected', (function () {
+  try {
+    Scheduler.generateSchedule(roster(3), { courts: 1, rounds: 3 });
+    return false;
+  } catch (err) { return true; }
+})());
+
+/* ------------------------------------------------------------- validation */
+
+check('9-6 is a valid finish', Model.validateScore(9, 6, 9, 1) === null);
+check('9-8 is a valid finish', Model.validateScore(9, 8, 9, 1) === null);
+check('8-6 is unfinished', Model.validateScore(8, 6, 9, 1) !== null);
+check('a tie is rejected', Model.validateScore(9, 9, 9, 1) !== null);
+check('11-9 is rejected when playing to 9', Model.validateScore(11, 9, 9, 1) !== null);
+check('win-by-2 rejects 9-8', Model.validateScore(9, 8, 9, 2) !== null);
+check('win-by-2 accepts 10-8', Model.validateScore(10, 8, 9, 2) === null);
+check('negative scores are rejected', Model.validateScore(-1, 9, 9, 1) !== null);
+
+check('roster below the minimum is flagged', Model.rosterError(roster(5)) !== null);
+check('roster above the maximum is flagged', Model.rosterError(roster(25)) !== null);
+check('a valid roster passes', Model.rosterError(roster(12)) === null);
+check('duplicate names are flagged',
+  Model.rosterError([Model.createPlayer('Ann'), Model.createPlayer('ann')].concat(roster(5))) !== null);
+
+/* -------------------------------------------------------------- standings */
+
+(function standingsTest() {
+  const players = roster(8);
+  const tournament = {
+    players: players,
+    settings: { courts: 2, rounds: 5, targetScore: 9, winBy: 1 },
+    schedule: Scheduler.generateSchedule(players, { courts: 2, rounds: 5 }, seeded(7)),
+  };
+
+  const progress0 = Standings.roundRobinProgress(tournament);
+  check('progress starts at zero', progress0.done === 0 && progress0.complete === false);
+
+  // Player 1 wins every game they play 9-2; everything else goes to team A 9-7.
+  const hero = players[0].id;
+  tournament.schedule.forEach(function (round) {
+    round.games.forEach(function (game) {
+      const heroOnA = game.teamA.indexOf(hero) !== -1;
+      const heroOnB = game.teamB.indexOf(hero) !== -1;
+      if (heroOnB) { game.scoreA = 2; game.scoreB = 9; }
+      else if (heroOnA) { game.scoreA = 9; game.scoreB = 2; }
+      else { game.scoreA = 9; game.scoreB = 7; }
+    });
+  });
+
+  const progress = Standings.roundRobinProgress(tournament);
+  check('progress reaches complete', progress.complete === true);
+
+  const table = Standings.compute(tournament);
+  check('every player appears once', table.length === 8);
+  check('the undefeated player is first', table[0].playerId === hero);
+  check('the undefeated player has no losses', table[0].l === 0);
+  check('first place is rank 1', table[0].rank === 1);
+
+  const totalGames = table.reduce(function (sum, row) { return sum + row.gp; }, 0);
+  check('game participation adds up', totalGames === progress.done * 4);
+
+  const pf = table.reduce(function (sum, row) { return sum + row.pf; }, 0);
+  const pa = table.reduce(function (sum, row) { return sum + row.pa; }, 0);
+  check('points for and against balance', pf === pa);
+
+  const ranks = table.map(function (row) { return row.rank; });
+  check('ranks never decrease', ranks.every(function (r, i) { return i === 0 || r >= ranks[i - 1]; }));
+})();
+
+(function tieTest() {
+  const players = roster(6);
+  const table = Standings.compute({
+    players: players,
+    schedule: [{
+      round: 1,
+      byes: [players[4].id, players[5].id],
+      games: [{ teamA: [players[0].id, players[1].id], teamB: [players[2].id, players[3].id], scoreA: 9, scoreB: 8 }],
+    }],
+  });
+  check('winners share rank 1', table[0].rank === 1 && table[1].rank === 1);
+  check('shared ranks are marked tied', table[0].tied === true);
+  check('byes are counted', table.filter(function (r) { return r.byes === 1; }).length === 2);
+})();
+
+/* ----------------------------------------------------------------- finals */
+
+(function finalsTest() {
+  const players = roster(4);
+  const ids = players.map(function (p) { return p.id; });
+  const byId = {};
+  players.forEach(function (p) { byId[p.id] = p; });
+
+  const finals = Finals.start(ids);
+  check('finals has three games', finals.games.length === 3);
+
+  const partnerships = new Set();
+  finals.games.forEach(function (g) {
+    partnerships.add(g.teamA.slice().sort().join('|'));
+    partnerships.add(g.teamB.slice().sort().join('|'));
+  });
+  check('every partner combination is used exactly once', partnerships.size === 6);
+
+  finals.games.forEach(function (g) {
+    check('finalists are not on both sides', new Set(g.teamA.concat(g.teamB)).size === 4);
+  });
+
+  check('an incomplete finals has no champions', Finals.champions(finals, byId).length === 0);
+
+  // Seeds 1 and 2 take every game they are on the winning side of.
+  finals.games[0].scoreA = 9; finals.games[0].scoreB = 5; // 1&4 beat 2&3
+  finals.games[1].scoreA = 9; finals.games[1].scoreB = 3; // 1&3 beat 2&4
+  finals.games[2].scoreA = 9; finals.games[2].scoreB = 1; // 1&2 beat 3&4
+
+  check('completed finals is detected', Finals.isComplete(finals) === true);
+  const champions = Finals.champions(finals, byId);
+  check('exactly two champions', champions.length === 2);
+  check('seed 1 wins out', champions[0].playerId === ids[0] && champions[0].w === 3);
+
+  const results = Finals.compute(finals, byId);
+  check('every finalist plays all three games', results.every(function (r) { return r.gp === 3; }));
+  check('six wins are distributed', results.reduce(function (s, r) { return s + r.w; }, 0) === 6);
+
+  check('finals reject a duplicate finalist', (function () {
+    try { Finals.start([ids[0], ids[0], ids[1], ids[2]]); return false; } catch (e) { return true; }
+  })());
+  check('finals reject the wrong player count', (function () {
+    try { Finals.start(ids.slice(0, 3)); return false; } catch (e) { return true; }
+  })());
+})();
+
+/* ------------------------------------------------------------------ report */
+
+if (failures.length) {
+  console.error('FAILED ' + failures.length + ' check(s):');
+  failures.forEach(function (f) { console.error('  ✗ ' + f); });
+  console.error(passed + ' passed.');
+  process.exit(1);
+}
+console.log('✓ all ' + passed + ' checks passed');

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pickleball Tournament</title>
+  <link rel="stylesheet" href="assets/styles.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#127934;</text></svg>">
+</head>
+<body>
+  <header class="app-header">
+    <div class="app-title">
+      <h1>Pickleball Tournament</h1>
+      <p class="tagline" id="tagline">Games to 9, win by 1</p>
+    </div>
+    <nav class="tournament-tabs" id="tournamentTabs" aria-label="Tournaments"></nav>
+  </header>
+
+  <nav class="view-nav" id="viewNav" aria-label="Sections"></nav>
+
+  <main id="view" class="view"></main>
+
+  <footer class="app-footer">
+    <span id="storageNote"></span>
+    <span class="footer-actions">
+      <button type="button" class="link" id="exportBtn">Export JSON</button>
+      <button type="button" class="link" id="printBtn">Print</button>
+    </span>
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="js/model.js"></script>
+  <script src="js/scheduler.js"></script>
+  <script src="js/standings.js"></script>
+  <script src="js/finals.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
