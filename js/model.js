@@ -39,9 +39,13 @@
     };
   }
 
+  // The two draws that run side by side.
+  const DEFAULT_NAMES = ['Advanced', 'Intermediate'];
+  const LEGACY_NAMES = ['Tournament A', 'Tournament B'];
+
   function defaultState() {
-    const a = createTournament('Tournament A');
-    const b = createTournament('Tournament B');
+    const a = createTournament(DEFAULT_NAMES[0]);
+    const b = createTournament(DEFAULT_NAMES[1]);
     return {
       version: 1,
       activeTournamentId: a.id,
@@ -90,6 +94,8 @@
   }
 
   return {
+    DEFAULT_NAMES: DEFAULT_NAMES,
+    LEGACY_NAMES: LEGACY_NAMES,
     MIN_PLAYERS: MIN_PLAYERS,
     MAX_PLAYERS: MAX_PLAYERS,
     PLAYERS_PER_GAME: PLAYERS_PER_GAME,

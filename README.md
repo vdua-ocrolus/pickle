@@ -6,6 +6,9 @@ champions.
 
 Open `index.html` in a browser. No install, no build step, no server, no network.
 
+**It works with no internet.** Load the page once somewhere with a signal and it keeps
+working at a court with none — see [Offline use](#offline-use).
+
 ## Format
 
 **Round robin.** Partners are drawn at random every round — you never keep the same
@@ -45,7 +48,29 @@ scored, then round-robin seed. **The top two records win the tournament.**
 6. **Data** — save a restore point, load one back, or wipe everything and start over.
 
 The two tabs at the top are fully independent tournaments — separate rosters, settings,
-schedules and results.
+schedules and results. They start named **Advanced** and **Intermediate**; rename either
+on its Setup tab.
+
+## Offline use
+
+The app makes no network requests once it is running: no API, no fonts, no CDN, no
+analytics. A service worker caches the page and its files on first visit, so after one
+load with a connection it opens and runs with none.
+
+To set a device up for a tournament:
+
+1. Open the site once somewhere with signal and wait for **Works offline** in the footer.
+2. Add it to the home screen — iOS: Share → Add to Home Screen; Android: menu → Install app.
+   It then opens full-screen with its own icon.
+3. Go to the court. Everything works: pairings, score entry, standings, finals, saves.
+
+Scores live in that device's storage, so the device that scores a tournament is the one
+that holds it. Airplane mode is a fair test of the whole setup.
+
+One maintenance note: `sw.js` serves from cache first — deliberately, because a weak
+signal at a court is worse than none, and a network-first strategy would stall on it. So
+**bump `CACHE_VERSION` in `sw.js` whenever a cached file changes**, or returning devices
+keep the old version.
 
 ### Defaults
 
@@ -109,7 +134,10 @@ Nothing else in the app touches storage directly.
 ## Layout
 
 ```
-index.html          markup and script tags
+index.html          markup, script tags, service worker registration
+sw.js               offline cache
+manifest.webmanifest  home-screen install metadata
+assets/icons/       app icons
 assets/styles.css   styling, including dark mode and print
 js/model.js         data shapes, defaults, score and roster validation
 js/scheduler.js     round-robin draw

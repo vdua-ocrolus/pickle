@@ -4,8 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Pickleball Tournament</title>
+  <meta name="description" content="Round-robin doubles scorekeeper for two simultaneous pickleball tournaments.">
+  <meta name="theme-color" content="#1f7a4d">
   <link rel="stylesheet" href="assets/styles.css">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>&#127934;</text></svg>">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/icons/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Pickleball">
 </head>
 <body>
   <header class="app-header">
@@ -22,6 +29,7 @@
 
   <footer class="app-footer">
     <span id="storageNote"></span>
+    <span id="offlineNote" class="offline-note"></span>
     <span class="footer-actions">
       <button type="button" class="link" id="exportBtn">Export JSON</button>
       <button type="button" class="link" id="printBtn">Print</button>
@@ -38,5 +46,18 @@
   <script src="js/demo.js"></script>
   <script src="js/storage.js"></script>
   <script src="js/app.js"></script>
+  <script>
+    /* Registered from the page rather than app.js so a browser without service
+       worker support (or a file:// open) simply skips it and the app still runs. */
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+          .then(function () {
+            if (window.App && window.App.markOfflineReady) window.App.markOfflineReady();
+          })
+          .catch(function (err) { console.warn('Offline support unavailable:', err); });
+      });
+    }
+  </script>
 </body>
 </html>

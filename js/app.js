@@ -1027,9 +1027,14 @@
     if (!loaded || !Array.isArray(loaded.tournaments) || loaded.tournaments.length < 2) {
       return window.Model.defaultState();
     }
-    loaded.tournaments.forEach(function (t) {
+    loaded.tournaments.forEach(function (t, index) {
       t.settings = Object.assign({}, window.Model.DEFAULT_SETTINGS, t.settings || {});
       t.players = t.players || [];
+      // Carry state saved under the old placeholder names over to the new
+      // defaults, while leaving any name the user chose alone.
+      if (t.name === window.Model.LEGACY_NAMES[index]) {
+        t.name = window.Model.DEFAULT_NAMES[index];
+      }
     });
     if (!loaded.tournaments.some(function (t) { return t.id === loaded.activeTournamentId; })) {
       loaded.activeTournamentId = loaded.tournaments[0].id;
@@ -1046,7 +1051,18 @@
     save();
   }
 
-  window.App = { start: start, getState: function () { return state; } };
+  /* Called once the service worker registers, so the footer can say plainly
+     whether the app will still open with no connection. */
+  function markOfflineReady() {
+    const node = document.getElementById('offlineNote');
+    if (node) node.textContent = 'Works offline';
+  }
+
+  window.App = {
+    start: start,
+    getState: function () { return state; },
+    markOfflineReady: markOfflineReady,
+  };
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start);

@@ -229,7 +229,9 @@ check('duplicate names are flagged',
   state.tournaments[0].name = 'Changed';
   const restored = store.restore(first.snapshot.id);
   check('restore is isolated from later edits', restored.tournaments[0].players.length === 8);
-  check('restore keeps the saved name', restored.tournaments[0].name === 'Tournament A');
+  check('restore keeps the saved name',
+    restored.tournaments[0].name === Model.DEFAULT_NAMES[0],
+    'got ' + restored.tournaments[0].name);
 
   // Editing what restore handed back must not reach into the snapshot either.
   restored.tournaments[0].players = [];
@@ -360,6 +362,18 @@ check('duplicate names are flagged',
   const skipped = Demo.fill(tournament, { includeFinals: false }, seeded(12));
   check('finals can be skipped', skipped.finals === 0);
   check('skipped finals stay empty', Finals.isComplete(tournament.finals) === false);
+})();
+
+/* ---------------------------------------------------------- default naming */
+
+check('the two draws are named for their levels',
+  Model.DEFAULT_NAMES.join(' / ') === 'Advanced / Intermediate');
+(function () {
+  const fresh = Model.defaultState();
+  check('a fresh state uses the level names',
+    fresh.tournaments[0].name === 'Advanced' && fresh.tournaments[1].name === 'Intermediate');
+  check('the two draws stay independent', fresh.tournaments[0].id !== fresh.tournaments[1].id);
+  check('legacy names are still known for migration', Model.LEGACY_NAMES.length === 2);
 })();
 
 /* ------------------------------------------------------------------ report */
