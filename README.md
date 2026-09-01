@@ -9,6 +9,9 @@ Open `index.html` in a browser. No install, no build step, no server, no network
 **It works with no internet.** Load the page once somewhere with a signal and it keeps
 working at a court with none — see [Offline use](#offline-use).
 
+Handing this to someone who just needs to run a tournament? Give them
+[QUICKSTART.md](QUICKSTART.md) instead — a plain-language phone guide with no jargon.
+
 ## Format
 
 **Round robin.** Partners are drawn at random every round — you never keep the same
