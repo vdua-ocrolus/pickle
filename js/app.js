@@ -631,7 +631,7 @@
         ]),
         el('p', { class: 'muted', text: 'Ranked by win percentage, then point differential, ' +
           'then points scored. The top four advance to the finals.' }),
-        table,
+        el('div', { class: 'table-wrap' }, [table]),
         window.Standings.tieAtCutLine(rows) ? el('p', { class: 'notice warn' }, [
           'Players 4 and 5 are dead even. Settle it on court, or pick the fourth ' +
           'finalist by hand on the Finals tab.',
@@ -700,11 +700,13 @@
 
     wrap.appendChild(el('section', { class: 'card' }, [
       el('h2', { text: 'Finals standings' }),
-      el('table', { class: 'table' }, [
-        el('thead', {}, [el('tr', {}, [
-          th('#'), th('Player'), th('Seed'), th('W'), th('L'), th('PF'), th('PA'), th('Diff'),
-        ])]),
-        buildFinalsTableBody(t, complete),
+      el('div', { class: 'table-wrap' }, [
+        el('table', { class: 'table finals-table' }, [
+          el('thead', {}, [el('tr', {}, [
+            th('#'), th('Player'), th('Seed'), th('W'), th('L'), th('PF'), th('PA'), th('Diff'),
+          ])]),
+          buildFinalsTableBody(t, complete),
+        ]),
       ]),
     ]));
 

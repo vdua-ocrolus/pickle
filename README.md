@@ -51,6 +51,22 @@ The two tabs at the top are fully independent tournaments — separate rosters, 
 schedules and results. They start named **Advanced** and **Intermediate**; rename either
 on its Setup tab.
 
+## On a phone
+
+The layout is built for a phone first, since that is what is in someone's hand at a court.
+
+- Buttons, score boxes and the remove-player control are all at least 44px, the size a
+  thumb actually hits.
+- Score boxes open the numeric keypad, and text is 16px so iOS never zooms on focus.
+- On a narrow screen the standings drop the supporting columns (points for, points
+  against, byes) and keep rank, name, games played, W–L, win % and differential. Turn the
+  phone to landscape for the full table.
+- Tables scroll inside their own card, so a long name can never drag the whole page
+  sideways.
+
+Checked for layout overflow and undersized tap targets at 320, 375 and 393px wide plus
+landscape, across every tab.
+
 ## Offline use
 
 The app makes no network requests once it is running: no API, no fonts, no CDN, no

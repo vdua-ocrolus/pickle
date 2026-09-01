@@ -32,6 +32,9 @@
 
 * { box-sizing: border-box; }
 
+/* No 300ms double-tap delay on the controls people actually poke at. */
+button, input, select, textarea, a { touch-action: manipulation; }
+
 body {
   margin: 0;
   font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -98,7 +101,8 @@ p { margin: 0; }
   border: none;
   background: transparent;
   border-radius: 999px;
-  padding: 7px 15px;
+  padding: 11px 15px;
+  min-height: 44px;
   font: inherit;
   font-weight: 550;
   color: var(--ink-soft);
@@ -126,7 +130,7 @@ p { margin: 0; }
 
 .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .row.spread { justify-content: space-between; }
-.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr)); gap: 12px; }
 .muted { color: var(--ink-soft); font-size: .88rem; }
 
 /* ------------------------------------------------------------------ inputs */
@@ -151,7 +155,7 @@ textarea { width: 100%; resize: vertical; }
 .field-label { font-size: .8rem; font-weight: 600; color: var(--ink-soft); }
 .field input, .field select { width: 100%; }
 
-.btn { cursor: pointer; font-weight: 600; }
+.btn { cursor: pointer; font-weight: 600; min-height: 44px; }
 .btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 .btn.subtle { background: transparent; color: var(--ink-soft); }
 .btn[disabled] { opacity: .45; cursor: not-allowed; }
@@ -162,7 +166,8 @@ textarea { width: 100%; resize: vertical; }
   color: var(--accent);
   font: inherit;
   cursor: pointer;
-  padding: 0 6px;
+  padding: 12px 8px;
+  min-height: 44px;
 }
 
 .icon-btn {
@@ -171,21 +176,28 @@ textarea { width: 100%; resize: vertical; }
   color: var(--ink-soft);
   cursor: pointer;
   font-size: 1rem;
-  padding: 4px 8px;
-  border-radius: 6px;
+  /* Sized for a thumb, not a mouse pointer. */
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border-radius: 8px;
+  flex: none;
 }
 .icon-btn:hover { background: var(--bg); color: var(--error); }
 
 /* ------------------------------------------------------------------ roster */
 
-.roster { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 6px; }
-.roster-item { display: flex; align-items: center; gap: 8px; }
+.roster { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 6px; }
+.roster-item { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .roster-num { width: 22px; text-align: right; color: var(--ink-soft); font-size: .8rem; }
 .roster-name { flex: 1; min-width: 0; }
 
 /* ------------------------------------------------------------------- games */
 
-.games { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 10px; }
+.games { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr)); gap: 10px; }
 
 .game {
   border: 1px solid var(--line);
@@ -234,6 +246,7 @@ textarea { width: 100%; resize: vertical; }
 
 /* ------------------------------------------------------------------ tables */
 
+.table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
 .table { width: 100%; border-collapse: collapse; font-size: .9rem; }
 .table th, .table td { padding: 8px 6px; text-align: right; border-bottom: 1px solid var(--line); }
 .table th:nth-child(2), .table td:nth-child(2) { text-align: left; width: 100%; }
@@ -328,6 +341,37 @@ textarea { width: 100%; resize: vertical; }
 .toast.show { transform: translate(-50%, 0); }
 .toast.error { background: var(--error); color: #fff; }
 .toast.warn { background: var(--warn); color: #fff; }
+
+/* ------------------------------------------------------------------ phones */
+
+@media (max-width: 480px) {
+  .view { padding: 12px; }
+  .card { padding: 13px; }
+  .app-header { padding: 12px 12px 0; }
+  .view-nav { padding: 8px 12px; gap: 2px; }
+  .view-tab { padding: 11px 12px; }
+
+  /* Both draws stay visible side by side instead of scrolling out of view. */
+  .tab { min-width: 0; padding: 9px 10px; }
+  .tab-name { font-size: .9rem; }
+  .tab-meta { font-size: .72rem; }
+
+  h1 { font-size: 1.1rem; }
+  .tagline { font-size: .8rem; }
+
+  /* Supporting stats give way to the ones read at a glance. Rotating to
+     landscape brings the full table back. */
+  .table th, .table td { padding: 9px 4px; }
+  .standings th:nth-child(7), .standings td:nth-child(7),
+  .standings th:nth-child(8), .standings td:nth-child(8),
+  .standings th:nth-child(10), .standings td:nth-child(10),
+  .finals-table th:nth-child(6), .finals-table td:nth-child(6),
+  .finals-table th:nth-child(7), .finals-table td:nth-child(7) { display: none; }
+
+  .roster { grid-template-columns: 1fr; }
+  .champion-names { font-size: 1.2rem; }
+  .toast { bottom: 12px; }
+}
 
 @media print {
   .app-header .tournament-tabs, .view-nav, .app-footer, .btn, .icon-btn, .toast { display: none !important; }

@@ -6,7 +6,7 @@
  * worse than no signal, and a network-first strategy would stall on it — so a
  * new version only reaches people when this string changes.
  */
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const CACHE_NAME = 'pickleball-' + CACHE_VERSION;
 
 const PRECACHE = [
