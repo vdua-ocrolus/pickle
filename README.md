@@ -75,11 +75,24 @@ The **Data** tab adds explicit control on top of that autosave:
 | **Export to file** | Downloads the state as JSON, to move devices or survive a browser wipe. |
 | **Import from file** | Loads a previously exported file back in. |
 | **Kill everything** | Wipes both tournaments to empty. Saved snapshots are deliberately kept. |
+| **Fill / Re-roll** | Plays the active tournament out with random results — see below. |
 
 Snapshots live under their own storage key (`pickleball-snapshots-v1`), separate from the
 live tournaments, which is why **Kill** cannot destroy them — save first and it is always
 recoverable. Up to 20 snapshots; past that, delete one to make room. Because they live in
 this browser, use **Export to file** for anything you truly cannot lose.
+
+### Random fill
+
+Typing 32 scores to see what the standings look like is no way to try the app out.
+**Fill** on the Data tab plays the active tournament out with random results, finals
+included, so one click gets you to a champion.
+
+Every score it writes is one you could have typed: the winner lands on the target and the
+loser far enough back to satisfy the winning margin, whatever those are set to. Sides are
+drawn at random, so ties turn up on their own and the tiebreak rules actually get
+exercised. **Fill** only touches games with no score, leaving anything you entered by
+hand; **Re-roll** replaces every score.
 
 Smaller resets stay where the work is: **Regenerate schedule** and **Reset tournament** on
 Setup, **Clear all scores** on Schedule, **Reset finals** on Finals.
@@ -103,6 +116,7 @@ js/scheduler.js     round-robin draw
 js/standings.js     individual standings and ranking
 js/finals.js        finals bracket and champions
 js/snapshots.js     named save/restore points
+js/demo.js          random score fill for testing
 js/storage.js       persistence adapter
 js/app.js           UI
 tests/logic.test.js checks for everything above except the UI
@@ -118,4 +132,5 @@ No dependencies. Covers every roster size from 6 to 24 against 1–4 courts, che
 nobody is double-booked or dropped from a round, that sit-outs stay within one of each
 other, that partners do not repeat, plus score validation, standings, ties and the
 finals bracket, and the snapshot store (isolation of saved copies, the cap, and
-storage failures).
+storage failures), and the random fill (legal scores under several scoring
+rules, overwrite behaviour, and filling the finals).

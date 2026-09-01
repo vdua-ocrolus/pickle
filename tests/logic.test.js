@@ -6,6 +6,7 @@ const Scheduler = require('../js/scheduler.js');
 const Standings = require('../js/standings.js');
 const Finals = require('../js/finals.js');
 const Snapshots = require('../js/snapshots.js');
+const Demo = require('../js/demo.js');
 
 let passed = 0;
 const failures = [];
@@ -269,6 +270,96 @@ check('duplicate names are flagged',
   });
   const failed = fullStore.add('no room', state, '');
   check('a storage failure is reported, not thrown', failed.ok === false && !!failed.error);
+})();
+
+/* ------------------------------------------------------- random score fill */
+
+(function fillTest() {
+  [{ targetScore: 9, winBy: 1 }, { targetScore: 11, winBy: 2 }, { targetScore: 15, winBy: 2 }]
+    .forEach(function (rule) {
+      const players = roster(10);
+      const settings = Object.assign({ courts: 2, rounds: 5 }, rule);
+      const tournament = {
+        name: 'Fill test',
+        players: players,
+        settings: settings,
+        schedule: Scheduler.generateSchedule(players, settings, seeded(21)),
+        finals: null,
+      };
+      const tag = 'to ' + rule.targetScore + ' win by ' + rule.winBy;
+
+      const expected = Demo.countFillable(tournament);
+      const result = Demo.fill(tournament, {}, seeded(99));
+      check('fill count matches the estimate (' + tag + ')', result.roundRobin === expected);
+      check('fill reports no finals when there are none (' + tag + ')', result.finals === 0);
+
+      const progress = Standings.roundRobinProgress(tournament);
+      check('a fill completes the round robin (' + tag + ')', progress.complete === true);
+
+      // The whole point: nothing it writes may be a score the app would reject.
+      let illegal = 0;
+      let decided = 0;
+      tournament.schedule.forEach(function (round) {
+        round.games.forEach(function (g) {
+          if (Model.validateScore(g.scoreA, g.scoreB, rule.targetScore, rule.winBy)) illegal += 1;
+          if (g.scoreA !== g.scoreB) decided += 1;
+        });
+      });
+      check('every filled score is legal (' + tag + ')', illegal === 0, illegal + ' illegal');
+      check('no filled game is a tie (' + tag + ')', decided === expected);
+
+      // Standings must balance, which they only do if the fill is self-consistent.
+      const table = Standings.compute(tournament);
+      const pf = table.reduce(function (s2, r) { return s2 + r.pf; }, 0);
+      const pa = table.reduce(function (s2, r) { return s2 + r.pa; }, 0);
+      check('filled results balance (' + tag + ')', pf === pa);
+    });
+})();
+
+(function fillOverwriteTest() {
+  const players = roster(8);
+  const settings = { courts: 2, rounds: 4, targetScore: 9, winBy: 1 };
+  const tournament = {
+    name: 'Overwrite test',
+    players: players,
+    settings: settings,
+    schedule: Scheduler.generateSchedule(players, settings, seeded(5)),
+    finals: null,
+  };
+
+  // Pin one game by hand; a non-overwriting fill must leave it alone.
+  const pinned = tournament.schedule[0].games[0];
+  pinned.scoreA = 9;
+  pinned.scoreB = 0;
+
+  const all = Demo.countFillable(tournament, { overwrite: true });
+  const empties = Demo.countFillable(tournament);
+  check('a scored game is excluded from the empty count', empties === all - 1);
+
+  Demo.fill(tournament, {}, seeded(3));
+  check('fill leaves an existing score untouched', pinned.scoreA === 9 && pinned.scoreB === 0);
+
+  // Re-roll may legitimately land on the same numbers, so check the call reports
+  // the game as touched rather than guessing from the values.
+  const rerolled = Demo.fill(tournament, { overwrite: true }, seeded(4));
+  check('re-roll touches every game', rerolled.roundRobin === all);
+
+  // Finals get filled too, so one click can reach a champion.
+  const standings = Standings.compute(tournament);
+  tournament.finals = Finals.start(standings.slice(0, 4).map(function (r) { return r.playerId; }));
+  const withFinals = Demo.fill(tournament, {}, seeded(11));
+  check('finals are filled', withFinals.finals === 3);
+  check('round robin was already full', withFinals.roundRobin === 0);
+
+  const byId = {};
+  players.forEach(function (p) { byId[p.id] = p; });
+  check('a filled finals produces two champions', Finals.champions(tournament.finals, byId).length === 2);
+
+  // Opting out of the finals must leave them alone.
+  tournament.finals.games.forEach(function (g) { g.scoreA = null; g.scoreB = null; });
+  const skipped = Demo.fill(tournament, { includeFinals: false }, seeded(12));
+  check('finals can be skipped', skipped.finals === 0);
+  check('skipped finals stay empty', Finals.isComplete(tournament.finals) === false);
 })();
 
 /* ------------------------------------------------------------------ report */

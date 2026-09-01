@@ -904,6 +904,33 @@
       ]),
     ]));
 
+    /* --- Testing --- */
+    const active = activeTournament();
+    const pending = window.Demo.countFillable(active);
+    const total = window.Demo.countFillable(active, { overwrite: true });
+
+    wrap.appendChild(section('Testing', [
+      el('p', { class: 'muted', text: 'Plays out ' + active.name + ' with random results ' +
+        'so you can see standings, ties and the finals without typing scores. Every score ' +
+        'it writes obeys the same rules as one you type.' }),
+      !active.schedule
+        ? el('p', { class: 'notice warn', text: 'Generate a schedule on the Setup tab first.' })
+        : el('div', { class: 'row' }, [
+            el('button', {
+              type: 'button',
+              class: 'btn',
+              disabled: pending === 0,
+              onclick: function () { doFill(active, false); },
+            }, [pending ? 'Fill ' + pending + ' empty game' + (pending === 1 ? '' : 's') : 'Nothing left to fill']),
+            el('button', {
+              type: 'button',
+              class: 'btn subtle',
+              disabled: total === 0,
+              onclick: function () { doFill(active, true); },
+            }, ['Re-roll all ' + total]),
+          ]),
+    ]));
+
     /* --- Kill --- */
     wrap.appendChild(section('Kill', [
       el('p', { class: 'muted', text: 'Wipes both tournaments back to empty — rosters, ' +
@@ -926,6 +953,16 @@
     save();
     render();
     toast('Restored “' + snap.name + '”.', 'ok');
+  }
+
+  function doFill(t, overwrite) {
+    if (overwrite && !confirm('Replace every score in ' + t.name + ' with a random result?')) return;
+    const result = window.Demo.fill(t, { overwrite: overwrite });
+    if (!result.total) { toast('Nothing to fill.', 'warn'); return; }
+    save();
+    render();
+    toast('Filled ' + result.total + ' game' + (result.total === 1 ? '' : 's') +
+      (result.finals ? ' (including the finals)' : '') + '.', 'ok');
   }
 
   function doKill() {
