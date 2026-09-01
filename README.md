@@ -42,6 +42,8 @@ scored, then round-robin seed. **The top two records win the tournament.**
 5. **Finals** — the top four are pre-selected. Adjust them if you settled a tie on
    court, start the finals, and enter the three scores.
 
+6. **Data** — save a restore point, load one back, or wipe everything and start over.
+
 The two tabs at the top are fully independent tournaments — separate rosters, settings,
 schedules and results.
 
@@ -62,8 +64,25 @@ you are asked to confirm first.
 
 Everything is saved to this browser's `localStorage` as you go — close the tab, reload,
 lose signal, and your scores are still there. Data does not sync between devices, so run
-each tournament from one device. **Export JSON** in the footer takes a backup;
-**Print** produces a clean schedule or standings sheet.
+each tournament from one device. **Print** produces a clean schedule or standings sheet.
+
+The **Data** tab adds explicit control on top of that autosave:
+
+| Action | What it does |
+| --- | --- |
+| **Save** | Snapshots both tournaments under a name — rosters, settings, every score, the finals. |
+| **Restore** | Puts a saved snapshot back, replacing current state. |
+| **Export to file** | Downloads the state as JSON, to move devices or survive a browser wipe. |
+| **Import from file** | Loads a previously exported file back in. |
+| **Kill everything** | Wipes both tournaments to empty. Saved snapshots are deliberately kept. |
+
+Snapshots live under their own storage key (`pickleball-snapshots-v1`), separate from the
+live tournaments, which is why **Kill** cannot destroy them — save first and it is always
+recoverable. Up to 20 snapshots; past that, delete one to make room. Because they live in
+this browser, use **Export to file** for anything you truly cannot lose.
+
+Smaller resets stay where the work is: **Regenerate schedule** and **Reset tournament** on
+Setup, **Clear all scores** on Schedule, **Reset finals** on Finals.
 
 To move to a shared backend later, write an adapter with the same `load`/`save`/
 `describe` methods as the one in `js/storage.js` and register it before startup:
@@ -83,6 +102,7 @@ js/model.js         data shapes, defaults, score and roster validation
 js/scheduler.js     round-robin draw
 js/standings.js     individual standings and ranking
 js/finals.js        finals bracket and champions
+js/snapshots.js     named save/restore points
 js/storage.js       persistence adapter
 js/app.js           UI
 tests/logic.test.js checks for everything above except the UI
@@ -97,4 +117,5 @@ node tests/logic.test.js
 No dependencies. Covers every roster size from 6 to 24 against 1–4 courts, checking that
 nobody is double-booked or dropped from a round, that sit-outs stay within one of each
 other, that partners do not repeat, plus score validation, standings, ties and the
-finals bracket.
+finals bracket, and the snapshot store (isolation of saved copies, the cap, and
+storage failures).

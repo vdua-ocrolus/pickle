@@ -255,6 +255,32 @@ textarea { width: 100%; resize: vertical; }
 }
 .badge.gold { background: var(--ball); color: #2b2b06; }
 
+.btn.danger { background: var(--error); border-color: var(--error); color: #fff; }
+.grow { flex: 1 1 200px; min-width: 0; }
+.grow input { width: 100%; }
+.file-input { display: none; }
+
+/* ------------------------------------------------------------------- saves */
+
+.snapshot-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+
+.snapshot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--bg);
+}
+
+.snapshot-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 220px; }
+.snapshot-name { font-weight: 650; }
+.snapshot-meta { font-size: .78rem; color: var(--ink-soft); overflow-wrap: anywhere; }
+.snapshot-meta:empty { display: none; }
+
 /* --------------------------------------------------------------- champions */
 
 .champions { align-items: center; text-align: center; border-color: var(--accent); }

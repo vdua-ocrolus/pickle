@@ -7,6 +7,7 @@
     { id: 'schedule', label: 'Schedule' },
     { id: 'standings', label: 'Standings' },
     { id: 'finals', label: 'Finals' },
+    { id: 'data', label: 'Data' },
   ];
 
   let state = null;
@@ -80,6 +81,7 @@
     if (view === 'setup') host.appendChild(renderSetup(tournament));
     else if (view === 'schedule') host.appendChild(renderSchedule(tournament));
     else if (view === 'standings') host.appendChild(renderStandings(tournament));
+    else if (view === 'data') host.appendChild(renderData());
     else host.appendChild(renderFinals(tournament));
   }
 
@@ -776,6 +778,186 @@
         }, ['Start finals']),
       ]),
     ]);
+  }
+
+  /* ------------------------------------------------------------- data view */
+
+  function snapshotStore() {
+    return window.Snapshots && window.Snapshots.store;
+  }
+
+  /* One line describing what a save contains, shown in the list. */
+  function stateSummary(snapshotState) {
+    return snapshotState.tournaments.map(function (t) {
+      return t.name + ' (' + tournamentSummary(t) + ')';
+    }).join(' · ');
+  }
+
+  function formatWhen(ts) {
+    const date = new Date(ts);
+    return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
+      ', ' + date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+
+  function defaultSaveName() {
+    const now = new Date();
+    return now.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) +
+      ' ' + now.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  }
+
+  function renderData() {
+    const store = snapshotStore();
+    const wrap = el('div', { class: 'stack' });
+
+    if (!store) {
+      wrap.appendChild(section('Saves unavailable', [
+        el('p', { class: 'notice warn', text: 'This browser is blocking local storage, so ' +
+          'saves cannot be kept. Use Export below to keep a copy as a file instead.' }),
+      ]));
+    }
+
+    /* --- Save --- */
+    const nameInput = el('input', {
+      type: 'text',
+      value: defaultSaveName(),
+      maxlength: '60',
+      placeholder: 'Name this save',
+      onkeydown: function (e) { if (e.key === 'Enter') { e.preventDefault(); doSave(); } },
+    });
+
+    function doSave() {
+      if (!store) { toast('Local storage is unavailable in this browser.', 'error'); return; }
+      const result = store.add(nameInput.value, state, stateSummary(state));
+      if (!result.ok) { toast(result.error, 'error'); return; }
+      toast('Saved “' + result.snapshot.name + '”.', 'ok');
+      render();
+    }
+
+    wrap.appendChild(section('Save', [
+      el('p', { class: 'muted', text: 'Takes a snapshot of both tournaments as they are ' +
+        'right now — rosters, settings, every score and the finals. Restore it later to ' +
+        'put everything back. Play around freely in between.' }),
+      el('div', { class: 'row' }, [
+        el('div', { class: 'grow' }, [nameInput]),
+        el('button', { type: 'button', class: 'btn primary', onclick: doSave }, ['Save']),
+      ]),
+    ]));
+
+    /* --- Restore --- */
+    const saves = store ? store.list() : [];
+    wrap.appendChild(section('Saved states' + (saves.length ? ' (' + saves.length + ')' : ''), [
+      saves.length
+        ? el('ul', { class: 'snapshot-list' }, saves.map(function (snap) {
+            return el('li', { class: 'snapshot' }, [
+              el('div', { class: 'snapshot-text' }, [
+                el('span', { class: 'snapshot-name', text: snap.name }),
+                el('span', { class: 'snapshot-meta', text: formatWhen(snap.savedAt) }),
+                el('span', { class: 'snapshot-meta', text: snap.summary || '' }),
+              ]),
+              el('div', { class: 'row' }, [
+                el('button', {
+                  type: 'button',
+                  class: 'btn',
+                  onclick: function () { doRestore(snap); },
+                }, ['Restore']),
+                el('button', {
+                  type: 'button',
+                  class: 'icon-btn',
+                  title: 'Delete this save',
+                  onclick: function () {
+                    if (!confirm('Delete the save “' + snap.name + '”?')) return;
+                    store.remove(snap.id);
+                    render();
+                    toast('Save deleted.', 'ok');
+                  },
+                }, ['✕']),
+              ]),
+            ]);
+          }))
+        : el('p', { class: 'muted', text: 'No saves yet.' }),
+    ]));
+
+    /* --- File backup --- */
+    const fileInput = el('input', {
+      type: 'file',
+      accept: 'application/json,.json',
+      class: 'file-input',
+      onchange: function (e) {
+        const file = e.target.files && e.target.files[0];
+        if (file) importFile(file);
+        e.target.value = '';
+      },
+    });
+
+    wrap.appendChild(section('Backup file', [
+      el('p', { class: 'muted', text: 'Saves above live in this browser only. Export a file ' +
+        'to move a tournament to another device, or to keep a copy that survives clearing ' +
+        'your browser data.' }),
+      el('div', { class: 'row' }, [
+        el('button', { type: 'button', class: 'btn', onclick: exportJson }, ['Export to file']),
+        el('button', {
+          type: 'button',
+          class: 'btn',
+          onclick: function () { fileInput.click(); },
+        }, ['Import from file']),
+        fileInput,
+      ]),
+    ]));
+
+    /* --- Kill --- */
+    wrap.appendChild(section('Kill', [
+      el('p', { class: 'muted', text: 'Wipes both tournaments back to empty — rosters, ' +
+        'schedules, scores, finals. Your saved states above are kept, so this is ' +
+        'recoverable as long as you saved first.' }),
+      el('div', { class: 'row' }, [
+        el('button', { type: 'button', class: 'btn danger', onclick: doKill }, ['Kill everything']),
+      ]),
+    ]));
+
+    return wrap;
+  }
+
+  function doRestore(snap) {
+    const store = snapshotStore();
+    if (!confirm('Restore “' + snap.name + '”? This replaces both tournaments as they are now.')) return;
+    const restored = store.restore(snap.id);
+    if (!restored) { toast('That save could not be read.', 'error'); return; }
+    state = migrate(restored);
+    save();
+    render();
+    toast('Restored “' + snap.name + '”.', 'ok');
+  }
+
+  function doKill() {
+    if (!confirm('Wipe both tournaments and start over? Saved states are kept.')) return;
+    state = window.Model.defaultState();
+    save();
+    render();
+    toast('Everything cleared.', 'ok');
+  }
+
+  function importFile(file) {
+    const reader = new FileReader();
+    reader.onload = function () {
+      let parsed;
+      try {
+        parsed = JSON.parse(String(reader.result));
+      } catch (err) {
+        toast('That file is not valid JSON.', 'error');
+        return;
+      }
+      if (!parsed || !Array.isArray(parsed.tournaments) || parsed.tournaments.length < 2) {
+        toast('That file does not look like a tournament export.', 'error');
+        return;
+      }
+      if (!confirm('Load this file? It replaces both tournaments as they are now.')) return;
+      state = migrate(parsed);
+      save();
+      render();
+      toast('Loaded from file.', 'ok');
+    };
+    reader.onerror = function () { toast('Could not read that file.', 'error'); };
+    reader.readAsText(file);
   }
 
   /* ---------------------------------------------------------------- shared */

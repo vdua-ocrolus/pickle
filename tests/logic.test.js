@@ -5,6 +5,7 @@ const Model = require('../js/model.js');
 const Scheduler = require('../js/scheduler.js');
 const Standings = require('../js/standings.js');
 const Finals = require('../js/finals.js');
+const Snapshots = require('../js/snapshots.js');
 
 let passed = 0;
 const failures = [];
@@ -198,6 +199,76 @@ check('duplicate names are flagged',
   check('finals reject the wrong player count', (function () {
     try { Finals.start(ids.slice(0, 3)); return false; } catch (e) { return true; }
   })());
+})();
+
+/* -------------------------------------------------------------- snapshots */
+
+(function snapshotTest() {
+  // Stand-in for localStorage.
+  const backing = {};
+  const store = Snapshots.createStore({
+    getItem: function (k) { return Object.prototype.hasOwnProperty.call(backing, k) ? backing[k] : null; },
+    setItem: function (k, v) { backing[k] = String(v); },
+    removeItem: function (k) { delete backing[k]; },
+  });
+
+  check('an empty store lists nothing', store.list().length === 0);
+
+  const state = Model.defaultState();
+  state.tournaments[0].players = roster(8);
+
+  const first = store.add('Before finals', state, 'eight players');
+  check('a save succeeds', first.ok === true);
+  check('the save is listed', store.list().length === 1);
+  check('the summary is kept', store.list()[0].summary === 'eight players');
+  check('an unnamed save is rejected', store.add('   ', state).ok === false);
+
+  // Mutating live state must not reach into the stored snapshot.
+  state.tournaments[0].players = [];
+  state.tournaments[0].name = 'Changed';
+  const restored = store.restore(first.snapshot.id);
+  check('restore is isolated from later edits', restored.tournaments[0].players.length === 8);
+  check('restore keeps the saved name', restored.tournaments[0].name === 'Tournament A');
+
+  // Editing what restore handed back must not reach into the snapshot either.
+  restored.tournaments[0].players = [];
+  check('restore returns a fresh copy each time',
+    store.restore(first.snapshot.id).tournaments[0].players.length === 8);
+
+  check('restoring an unknown id returns null', store.restore('nope') === null);
+
+  store.add('Second', state, '');
+  check('a second save is kept alongside the first', store.list().length === 2);
+  // Same-millisecond saves must still order newest-first, not arbitrarily.
+  check('newest sorts first', store.list()[0].name === 'Second');
+  store.add('Third', state, '');
+  check('newest of three sorts first', store.list()[0].name === 'Third');
+  check('older saves keep their order', store.list()[1].name === 'Second');
+
+  store.remove(first.snapshot.id);
+  const left = store.list();
+  const leftNames = left.map(function (s2) { return s2.name; });
+  check('delete removes only its own save',
+    left.length === 2 && leftNames.indexOf('Before finals') === -1,
+    'left behind: ' + leftNames.join(', '));
+
+  // Fill to the cap and confirm it refuses rather than silently dropping saves.
+  while (store.list().length < Snapshots.MAX_SNAPSHOTS) store.add('filler', state, '');
+  const overflow = store.add('one too many', state, '');
+  check('saves are capped', overflow.ok === false);
+  check('the cap message names the limit', /\d+/.test(overflow.error));
+
+  store.clear();
+  check('clear empties the store', store.list().length === 0);
+
+  // A full disk surfaces as an error, not a crash.
+  const fullStore = Snapshots.createStore({
+    getItem: function () { return null; },
+    setItem: function () { throw new Error('QuotaExceededError'); },
+    removeItem: function () {},
+  });
+  const failed = fullStore.add('no room', state, '');
+  check('a storage failure is reported, not thrown', failed.ok === false && !!failed.error);
 })();
 
 /* ------------------------------------------------------------------ report */
