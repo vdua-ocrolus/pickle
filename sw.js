@@ -6,7 +6,7 @@
  * worse than no signal, and a network-first strategy would stall on it — so a
  * new version only reaches people when this string changes.
  */
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const CACHE_NAME = 'pickleball-' + CACHE_VERSION;
 
 const PRECACHE = [
@@ -18,12 +18,16 @@ const PRECACHE = [
   'assets/icons/icon-192.png',
   'assets/icons/icon-512.png',
   'assets/icons/apple-touch-icon.png',
+  'js/config.js',
+  'vendor/qrcode.js',
   'js/model.js',
   'js/scheduler.js',
   'js/standings.js',
   'js/finals.js',
   'js/snapshots.js',
   'js/demo.js',
+  'js/share.js',
+  'js/sync.js',
   'js/storage.js',
   'js/app.js',
 ];

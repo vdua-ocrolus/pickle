@@ -7,6 +7,7 @@ const Standings = require('../js/standings.js');
 const Finals = require('../js/finals.js');
 const Snapshots = require('../js/snapshots.js');
 const Demo = require('../js/demo.js');
+const Share = require('../js/share.js');
 
 let passed = 0;
 const failures = [];
@@ -374,6 +375,95 @@ check('the two draws are named for their levels',
     fresh.tournaments[0].name === 'Advanced' && fresh.tournaments[1].name === 'Intermediate');
   check('the two draws stay independent', fresh.tournaments[0].id !== fresh.tournaments[1].id);
   check('legacy names are still known for migration', Model.LEGACY_NAMES.length === 2);
+})();
+
+/* ------------------------------------------------------------- share links */
+
+(function shareTest() {
+  const players = roster(12);
+  const settings = { courts: 2, rounds: 4, targetScore: 9, winBy: 1 };
+  const tournament = {
+    name: 'Advanced',
+    players: players,
+    settings: settings,
+    schedule: Scheduler.generateSchedule(players, settings, seeded(31)),
+    finals: null,
+  };
+  Demo.fill(tournament, {}, seeded(32));
+
+  check('base64url survives a round trip', Share.decode64(Share.encode64('hello')) === 'hello');
+  check('base64url handles non-ASCII names',
+    Share.decode64(Share.encode64('Renée Ökonomou 李')) === 'Renée Ökonomou 李');
+  check('base64url output is URL-safe', /^[A-Za-z0-9_-]*$/.test(Share.encode64('??>>>~~~###')));
+
+  const encoded = Share.encodeSnapshot(tournament);
+  const snap = Share.decodeSnapshot(encoded);
+  check('a snapshot decodes', snap !== null);
+  check('the snapshot carries the name', snap.name === 'Advanced');
+  check('every player is in the snapshot', snap.rows.length === 12);
+  check('progress is carried', snap.done === snap.total && snap.total > 0);
+
+  // The snapshot must agree with what the admin sees, or spectators are
+  // reading a different tournament.
+  const local = Standings.compute(tournament);
+  check('snapshot order matches the standings',
+    snap.rows.map(function (r) { return r.name; }).join() ===
+    local.map(function (r) { return r.name; }).join());
+  check('snapshot records match', snap.rows.every(function (r, i) {
+    return r.w === local[i].w && r.l === local[i].l && r.diff === local[i].diff;
+  }));
+
+  // A QR has to physically fit, so the worst case matters.
+  const big = roster(Model.MAX_PLAYERS).map(function (p, i) {
+    return Object.assign({}, p, { name: 'Verylongname Player ' + (i + 1) });
+  });
+  const bigT = {
+    name: 'A Long Tournament Name',
+    players: big,
+    settings: settings,
+    schedule: Scheduler.generateSchedule(big, settings, seeded(33)),
+    finals: null,
+  };
+  Demo.fill(bigT, {}, seeded(34));
+  const bigEncoded = Share.encodeSnapshot(bigT);
+  check('a full 24-player snapshot stays QR-sized', bigEncoded.length < 2000,
+    bigEncoded.length + ' chars');
+  check('the big snapshot still decodes', Share.decodeSnapshot(bigEncoded).rows.length === 24);
+
+  // Champions ride along once the finals are done.
+  const top4 = Standings.compute(tournament).slice(0, 4).map(function (r) { return r.playerId; });
+  tournament.finals = Finals.start(top4);
+  Demo.fill(tournament, {}, seeded(35));
+  const done = Share.decodeSnapshot(Share.encodeSnapshot(tournament));
+  check('champions are shared once decided', Array.isArray(done.champions) && done.champions.length === 2);
+
+  // Bad input must fail softly — a half-scanned QR should not break the page.
+  check('garbage decodes to null', Share.decodeSnapshot('!!!!not-base64!!!!') === null);
+  check('truncated payload decodes to null', Share.decodeSnapshot(encoded.slice(0, 40)) === null);
+  check('empty payload decodes to null', Share.decodeSnapshot('') === null);
+  check('valid base64 of the wrong thing decodes to null',
+    Share.decodeSnapshot(Share.encode64('{\"hello\":1}')) === null);
+
+  // URL mode detection drives which app the browser boots into.
+  check('a bare url is admin', Share.readMode('').mode === 'admin');
+  check('an unknown fragment is admin', Share.readMode('#something').mode === 'admin');
+  const liveMode = Share.readMode('#live=abc123xyz');
+  check('a live link is detected', liveMode.mode === 'live' && liveMode.shareId === 'abc123xyz');
+  check('a snapshot link is detected', Share.readMode('#snap=' + encoded).mode === 'snapshot');
+  check('a snapshot link keeps its payload', Share.readMode('#snap=' + encoded).payload === encoded);
+
+  const url = Share.snapshotUrl('https://example.com/pickle/#live=old', tournament);
+  check('building a url replaces any existing fragment',
+    url.indexOf('#snap=') > 0 && url.indexOf('live=old') === -1);
+  check('the live url points at the share id',
+    Share.liveUrl('https://example.com/pickle/', 'zzz') === 'https://example.com/pickle/#live=zzz');
+
+  // Ids are the read capability, so they must not collide or be guessable.
+  const ids = {};
+  for (let i = 0; i < 500; i++) ids[Share.newShareId()] = true;
+  check('share ids are unique across 500 draws', Object.keys(ids).length === 500);
+  check('share ids are long enough to be unguessable', Share.newShareId().length >= 16);
+  check('share ids are url-safe', /^[a-z0-9]+$/.test(Share.newShareId()));
 })();
 
 /* ------------------------------------------------------------------ report */

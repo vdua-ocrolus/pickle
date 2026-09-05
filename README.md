@@ -70,6 +70,77 @@ The layout is built for a phone first, since that is what is in someone's hand a
 Checked for layout overflow and undersized tap targets at 320, 375 and 393px wide plus
 landscape, across every tab.
 
+## Sharing with spectators
+
+Players can follow along on their own phones, read-only. Two routes, because they
+have opposite requirements.
+
+### QR snapshot — no server, no signal
+
+**Data → Show standings QR.** The standings are packed into the link itself and shown as
+a QR code. A spectator scans it and sees the table. Nothing is sent anywhere, no database
+is involved, and it works in airplane mode.
+
+It is a snapshot, not a feed: show a fresh code after each round.
+
+**The one catch:** the link points at this site, so the spectator's phone needs the app
+files. If they have opened the app before, the service worker has them and the scan works
+with no connection at all. If they have *never* opened it and have no signal, the scan
+cannot load anything. Have spectators open the link once while they still have a
+connection — at registration, or the night before — and they are set for the day.
+
+A full 24-player snapshot encodes to well under 2 KB, which is a QR that scans easily off
+a phone screen.
+
+### Live link — updates as scores are typed
+
+Off by default. To enable it, create a Firebase Realtime Database and put its URL in
+`js/config.js`:
+
+```js
+window.AppConfig = { DATABASE_URL: 'https://your-project-default-rtdb.firebaseio.com', ... };
+```
+
+Then **Data → Publish live** gives a link and QR. Watchers see scores appear as they are
+entered, plus the round currently on court.
+
+Database rules to start from:
+
+```json
+{
+  "rules": {
+    "tournaments": {
+      "$id": {
+        ".read": true,
+        ".write": true,
+        ".validate": "newData.hasChildren(['name', 'players'])"
+      }
+    }
+  }
+}
+```
+
+**Be clear about what that does and does not protect.** The published id is a random
+16-character string, and knowing it is what grants access — a capability URL. It is not
+guessable, but anyone you give the viewer link to could, with effort, write to that same
+path. For a club tournament that is proportionate: it stops strangers, not a determined
+guest. If you need it properly enforced, add Firebase Anonymous Auth and require
+`auth != null` for writes, with admins signed in and viewers not.
+
+**Stop publishing** deletes the published copy, so a finished board does not sit there
+looking live.
+
+No Firebase SDK is used — writes go over the REST API and viewers read the database's
+server-sent-events stream, both with what the browser already has. That keeps the app
+dependency-free and the offline guarantee intact.
+
+### Losing signal while publishing
+
+Local storage stays the source of truth. Publishing only ever queues: a push that fails
+is retried when the connection returns, on the next save, or on a timer. **Scoring is
+never blocked by the network** — a dead signal costs spectators freshness and costs the
+person entering scores nothing. The Data tab says which state you are in.
+
 ## Offline use
 
 The app makes no network requests once it is running: no API, no fonts, no CDN, no
@@ -164,6 +235,10 @@ js/standings.js     individual standings and ranking
 js/finals.js        finals bracket and champions
 js/snapshots.js     named save/restore points
 js/demo.js          random score fill for testing
+js/config.js        live-sharing configuration (empty = feature off)
+js/share.js         snapshot encoding and share links
+js/sync.js          Firebase REST publishing and the live viewer
+vendor/qrcode.js    vendored MIT QR encoder
 js/storage.js       persistence adapter
 js/app.js           UI
 tests/logic.test.js checks for everything above except the UI
@@ -180,4 +255,10 @@ nobody is double-booked or dropped from a round, that sit-outs stay within one o
 other, that partners do not repeat, plus score validation, standings, ties and the
 finals bracket, and the snapshot store (isolation of saved copies, the cap, and
 storage failures), and the random fill (legal scores under several scoring
-rules, overwrite behaviour, and filling the finals).
+rules, overwrite behaviour, and filling the finals), and share links (snapshot
+round-trips including non-ASCII names, agreement with the admin's own standings,
+worst-case QR payload size, malformed input, and share-id uniqueness).
+
+The transports are covered by browser tests rather than this suite: the QR route was
+checked with the network genuinely disabled, and the live route against a stand-in
+Firebase REST/SSE server, including losing and regaining signal mid-tournament.

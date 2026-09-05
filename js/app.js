@@ -12,6 +12,8 @@
 
   let state = null;
   const activeView = {}; // tournamentId -> view id, kept in memory only
+  let publisher = null;  // pushes the active tournament to the database
+  let viewer = null;     // live subscription, viewer mode only
 
   /* ---------------------------------------------------------------- helpers */
 
@@ -60,6 +62,8 @@
 
   function save() {
     window.Storage.save(state);
+    // Publishing is fire-and-forget: it queues and never blocks score entry.
+    if (publisher && publisher.isPublishing()) publisher.publish(activeTournament());
   }
 
   function currentView(tournament) {
@@ -906,6 +910,9 @@
       ]),
     ]));
 
+    /* --- Share --- */
+    wrap.appendChild(renderShareSection());
+
     /* --- Testing --- */
     const active = activeTournament();
     const pending = window.Demo.countFillable(active);
@@ -999,6 +1006,348 @@
     reader.readAsText(file);
   }
 
+  /* ------------------------------------------------------------ sharing UI */
+
+  const SHARE_STATUS_LABELS = {
+    synced: 'Everyone watching is up to date',
+    pending: 'Sending…',
+    offline: 'No connection — will send when you are back online',
+    error: 'Could not reach the server — will keep trying',
+    idle: '',
+  };
+
+  function showShareStatus(status) {
+    const node = document.getElementById('shareStatus');
+    if (!node) return;
+    node.textContent = SHARE_STATUS_LABELS[status] || '';
+    node.className = 'share-status ' + status;
+  }
+
+  /* Renders a QR into a container. Long snapshot payloads use the lowest error
+     correction so the code stays coarse enough to scan off a phone screen. */
+  function qrInto(container, text, dense) {
+    container.innerHTML = '';
+    try {
+      const qr = window.qrcode(0, dense ? 'L' : 'M');
+      qr.addData(text);
+      qr.make();
+      container.innerHTML = qr.createSvgTag({ cellSize: dense ? 3 : 5, margin: 8, scalable: true });
+    } catch (err) {
+      container.appendChild(el('p', { class: 'notice warn',
+        text: 'Too much data for one QR code. Use the link instead.' }));
+    }
+  }
+
+  function shareResult(url, heading, note, dense) {
+    const qrBox = el('div', { class: 'qr' });
+    qrInto(qrBox, url, dense);
+    return el('div', { class: 'share-result' }, [
+      el('h3', { text: heading }),
+      el('p', { class: 'muted', text: note }),
+      qrBox,
+      el('input', { type: 'text', readonly: true, value: url, class: 'share-url',
+        onfocus: function (e) { e.target.select(); } }),
+      el('div', { class: 'row' }, [
+        el('button', {
+          type: 'button', class: 'btn',
+          onclick: function () {
+            if (navigator.clipboard) {
+              navigator.clipboard.writeText(url)
+                .then(function () { toast('Link copied.', 'ok'); })
+                .catch(function () { toast('Select the link and copy it.', 'warn'); });
+            } else {
+              toast('Select the link and copy it.', 'warn');
+            }
+          },
+        }, ['Copy link']),
+        navigator.share ? el('button', {
+          type: 'button', class: 'btn',
+          onclick: function () { navigator.share({ title: 'Tournament standings', url: url }).catch(function () {}); },
+        }, ['Share…']) : null,
+      ]),
+    ]);
+  }
+
+  function renderShareSection() {
+    const t = activeTournament();
+    const output = el('div', { id: 'shareOutput' });
+    const children = [];
+
+    children.push(el('p', { class: 'muted', text: 'Let players follow along on their own ' +
+      'phones. They get a read-only board — they cannot change scores.' }));
+
+    /* Snapshot: no server, no signal, works anywhere. */
+    children.push(el('div', { class: 'share-option' }, [
+      el('h3', { text: 'QR code — works with no internet' }),
+      el('p', { class: 'muted', text: 'Puts the current standings inside the link itself. ' +
+        'Hold up the code, they scan it, they see the table. Nothing is sent anywhere. ' +
+        'It is a snapshot, so show a fresh code after each round.' }),
+      el('div', { class: 'row' }, [
+        el('button', {
+          type: 'button', class: 'btn primary',
+          disabled: !t.schedule,
+          onclick: function () {
+            const url = window.Share.snapshotUrl(window.location.href, t);
+            output.innerHTML = '';
+            output.appendChild(shareResult(url, 'Scan this',
+              'Standings for ' + t.name + ' as of right now.', true));
+          },
+        }, [t.schedule ? 'Show standings QR' : 'Generate a schedule first']),
+      ]),
+    ]));
+
+    /* Live: needs a database configured and a connection at both ends. */
+    if (window.Sync.enabled()) {
+      const on = publisher && publisher.isPublishing();
+      children.push(el('div', { class: 'share-option' }, [
+        el('h3', { text: 'Live link — updates as you score' }),
+        el('p', { class: 'muted', text: 'Publishes this tournament so watchers see scores ' +
+          'appear as you type them. Needs a connection on your phone and theirs. ' +
+          'If yours drops, scoring carries on as normal and catches up later.' }),
+        el('p', {
+          class: 'share-status ' + (publisher ? publisher.status() : 'idle'),
+          id: 'shareStatus',
+          text: publisher ? (SHARE_STATUS_LABELS[publisher.status()] || '') : '',
+        }),
+        el('div', { class: 'row' }, [
+          on ? el('button', {
+            type: 'button', class: 'btn subtle',
+            onclick: function () {
+              if (!confirm('Stop publishing? The link stops working for anyone watching.')) return;
+              publisher.remove();
+              publisher.stop();
+              if (window.Storage.saveShareId) window.Storage.saveShareId(null);
+              render();
+              toast('Publishing stopped.', 'ok');
+            },
+          }, ['Stop publishing']) : el('button', {
+            type: 'button', class: 'btn primary',
+            onclick: function () {
+              const id = window.Share.newShareId();
+              publisher.start(id);
+              publisher.publish(t);
+              if (window.Storage.saveShareId) window.Storage.saveShareId(id);
+              render();
+              toast('Published. Share the link.', 'ok');
+            },
+          }, ['Publish live']),
+          on ? el('button', {
+            type: 'button', class: 'btn',
+            onclick: function () {
+              const url = window.Share.liveUrl(window.location.href, publisher.shareId());
+              output.innerHTML = '';
+              output.appendChild(shareResult(url, 'Live board',
+                'Anyone with this link sees scores as you enter them.', false));
+            },
+          }, ['Show link and QR']) : null,
+        ]),
+      ]));
+    } else {
+      children.push(el('div', { class: 'share-option' }, [
+        el('h3', { text: 'Live link — not set up' }),
+        el('p', { class: 'muted', text: 'Live sharing needs a database URL in js/config.js. ' +
+          'Until then the QR code above covers spectators, and needs no internet at all.' }),
+      ]));
+    }
+
+    children.push(output);
+    return section('Share with players', children);
+  }
+
+  /* -------------------------------------------------------- viewer (shared) */
+
+  function viewerChrome(title, subtitle) {
+    document.getElementById('tournamentTabs').innerHTML = '';
+    document.getElementById('viewNav').innerHTML = '';
+    document.querySelector('.app-header').classList.add('viewer');
+    document.getElementById('tagline').textContent = subtitle || '';
+    document.querySelector('.app-title h1').textContent = title;
+    const footerActions = document.querySelector('.footer-actions');
+    if (footerActions) footerActions.innerHTML = '';
+  }
+
+  /* Standings table built from plain rows, so it serves both the live feed and
+     a decoded snapshot without either needing a full tournament object. */
+  function viewerStandingsTable(rows, marked) {
+    return el('div', { class: 'table-wrap' }, [
+      el('table', { class: 'table standings' }, [
+        el('thead', {}, [el('tr', {}, [
+          th('#'), th('Player'), th('GP'), th('W'), th('L'), th('Win %'),
+          th('PF'), th('PA'), th('Diff'), th('Byes'),
+        ])]),
+        el('tbody', {}, rows.map(function (row, i) {
+          const classes = [];
+          if (marked && i < 4) classes.push('qualifier');
+          if (marked && i === 3) classes.push('cut');
+          return el('tr', { class: classes.join(' ') }, [
+            td(String(row.rank || i + 1) + (row.tied ? '=' : '')),
+            el('td', { class: 'player-cell' }, [
+              row.name,
+              marked && i < 4 ? el('span', { class: 'badge', text: 'finals' }) : null,
+            ]),
+            td(String(row.gp)),
+            td(String(row.w)),
+            td(String(row.l)),
+            td(row.gp ? (row.winPct * 100).toFixed(0) + '%' : '—'),
+            td(String(row.pf)),
+            td(String(row.pa)),
+            td((row.diff > 0 ? '+' : '') + row.diff),
+            td(String(row.byes)),
+          ]);
+        })),
+      ]),
+    ]);
+  }
+
+  function championsCard(names) {
+    return el('section', { class: 'card champions' }, [
+      el('h2', { text: '🏆 Champions' }),
+      el('div', { class: 'champion-names' }, [
+        el('span', { text: names[0] }),
+        el('span', { class: 'amp', text: '&' }),
+        el('span', { text: names[1] }),
+      ]),
+    ]);
+  }
+
+  /* ------------------------------------------------------ snapshot viewer */
+
+  function startSnapshotViewer(payload) {
+    const snap = window.Share.decodeSnapshot(payload);
+    const host = document.getElementById('view');
+
+    if (!snap) {
+      viewerChrome('Pickleball Tournament', '');
+      host.appendChild(section('That link did not work', [
+        el('p', { class: 'muted', text: 'The code may have been cut off while scanning. ' +
+          'Ask whoever is running the tournament to show it again.' }),
+      ]));
+      return;
+    }
+
+    viewerChrome(snap.name, 'Standings · view only');
+    const wrap = el('div', { class: 'stack' });
+    if (snap.champions && snap.champions.length === 2) wrap.appendChild(championsCard(snap.champions));
+    wrap.appendChild(el('section', { class: 'card' }, [
+      el('div', { class: 'row spread' }, [
+        el('h2', { text: 'Standings' }),
+        el('span', { class: 'pill', text: snap.done + ' of ' + snap.total + ' games' }),
+      ]),
+      el('p', { class: 'muted', text: 'A snapshot, not a live feed — scan the code again ' +
+        'for the latest. Top four go to the finals.' }),
+      viewerStandingsTable(snap.rows, true),
+    ]));
+    host.appendChild(wrap);
+    document.getElementById('storageNote').textContent = 'Snapshot · nothing saved';
+  }
+
+  /* ---------------------------------------------------------- live viewer */
+
+  function startLiveViewer(shareId) {
+    viewerChrome('Pickleball Tournament', 'Live · view only');
+    const host = document.getElementById('view');
+    host.appendChild(el('section', { class: 'card' }, [
+      el('h2', { text: 'Connecting…' }),
+      el('p', { class: 'muted', text: 'Fetching the live board.' }),
+    ]));
+
+    if (!window.Sync.enabled()) {
+      host.innerHTML = '';
+      host.appendChild(section('Live sharing is not set up', [
+        el('p', { class: 'muted', text: 'This copy of the app has no database configured.' }),
+      ]));
+      return;
+    }
+
+    viewer = window.Sync.createViewer(shareId, function (data) {
+      renderLive(data);
+    }, function (status) {
+      const node = document.getElementById('liveStatus');
+      const labels = {
+        live: 'Live', connecting: 'Connecting…',
+        offline: 'Reconnecting…', missing: 'Not found',
+      };
+      if (node) node.textContent = labels[status] || '';
+      if (status === 'missing') {
+        host.innerHTML = '';
+        host.appendChild(section('Nothing here', [
+          el('p', { class: 'muted', text: 'This board has finished or the link is wrong. ' +
+            'Ask for a new one.' }),
+        ]));
+      }
+    });
+  }
+
+  function renderLive(data) {
+    const host = document.getElementById('view');
+    // The published shape matches a tournament closely enough to reuse the
+    // standings and finals maths directly.
+    const t = {
+      name: data.name || 'Tournament',
+      settings: data.settings || window.Model.DEFAULT_SETTINGS,
+      players: data.players || [],
+      schedule: data.schedule || null,
+      finals: data.finals || null,
+    };
+    document.querySelector('.app-title h1').textContent = t.name;
+
+    const rows = window.Standings.compute(t);
+    const progress = window.Standings.roundRobinProgress(t);
+    const byId = playersById(t);
+    const champions = window.Finals.isComplete(t.finals)
+      ? window.Finals.champions(t.finals, byId).map(function (c) { return c.name; })
+      : null;
+
+    const wrap = el('div', { class: 'stack' });
+    if (champions) wrap.appendChild(championsCard(champions));
+
+    wrap.appendChild(el('section', { class: 'card' }, [
+      el('div', { class: 'row spread' }, [
+        el('h2', { text: 'Standings' }),
+        el('span', { class: 'pill', id: 'liveStatus', text: 'Live' }),
+      ]),
+      el('p', { class: 'muted', text: progress.done + ' of ' + progress.total +
+        ' games played. Top four go to the finals.' }),
+      viewerStandingsTable(rows, true),
+    ]));
+
+    /* The round in progress is what a spectator actually wants to see. */
+    const current = (t.schedule || []).find(function (round) {
+      return round.games.some(function (g) { return !window.Model.isGameComplete(g); });
+    }) || (t.schedule || [])[(t.schedule || []).length - 1];
+
+    if (current) {
+      wrap.appendChild(el('section', { class: 'card' }, [
+        el('h2', { text: 'Round ' + current.round }),
+        el('div', { class: 'games' }, current.games.map(function (game) {
+          const done = window.Model.isGameComplete(game);
+          return el('div', { class: 'game' + (done ? ' complete' : '') }, [
+            el('span', { class: 'game-label', text: 'Court ' + game.court }),
+            el('div', { class: 'teams' }, [
+              el('div', { class: 'team' + (done && game.scoreA > game.scoreB ? ' winner' : '') }, [
+                el('span', { class: 'team-names', text: game.teamA.map(function (id) { return nameOf(t, id); }).join(' & ') }),
+                el('span', { class: 'score-text', text: done ? String(game.scoreA) : '–' }),
+              ]),
+              el('span', { class: 'vs', text: 'vs' }),
+              el('div', { class: 'team' + (done && game.scoreB > game.scoreA ? ' winner' : '') }, [
+                el('span', { class: 'team-names', text: game.teamB.map(function (id) { return nameOf(t, id); }).join(' & ') }),
+                el('span', { class: 'score-text', text: done ? String(game.scoreB) : '–' }),
+              ]),
+            ]),
+          ]);
+        })),
+        current.byes && current.byes.length ? el('p', { class: 'byes' }, [
+          el('strong', { text: 'Sitting out: ' }),
+          current.byes.map(function (id) { return nameOf(t, id); }).join(', '),
+        ]) : null,
+      ]));
+    }
+
+    host.innerHTML = '';
+    host.appendChild(wrap);
+    document.getElementById('storageNote').textContent = 'Live board · view only';
+  }
+
   /* ---------------------------------------------------------------- shared */
 
   function emptyState(title, body, t, gotoView) {
@@ -1045,10 +1394,32 @@
   }
 
   function start() {
+    // Opening a share link from an already-open tab only changes the fragment,
+    // which is a same-document navigation — without this the app would stay in
+    // whatever mode it booted in and quietly ignore the link.
+    window.addEventListener('hashchange', function () { window.location.reload(); });
+
+    const mode = window.Share.readMode(window.location.hash);
+    if (mode.mode === 'snapshot') return startSnapshotViewer(mode.payload);
+    if (mode.mode === 'live') return startLiveViewer(mode.shareId);
+    return startAdmin();
+  }
+
+  function startAdmin() {
     state = migrate(window.Storage.load());
     document.getElementById('storageNote').textContent = window.Storage.describe();
     document.getElementById('exportBtn').addEventListener('click', exportJson);
     document.getElementById('printBtn').addEventListener('click', function () { window.print(); });
+
+    if (window.Sync.enabled()) {
+      publisher = window.Sync.createPublisher(function (status) { showShareStatus(status); });
+      const saved = window.Storage.loadShareId && window.Storage.loadShareId();
+      if (saved) {
+        publisher.start(saved);
+        publisher.publish(activeTournament());
+      }
+    }
+
     render();
     save();
   }

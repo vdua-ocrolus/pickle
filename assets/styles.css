@@ -300,6 +300,43 @@ textarea { width: 100%; resize: vertical; }
 .champion-names { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; justify-content: center; font-size: 1.4rem; font-weight: 750; }
 .champion-names .amp { color: var(--ink-soft); font-weight: 400; }
 
+/* ------------------------------------------------------------------ sharing */
+
+.share-option { border-top: 1px solid var(--line); padding-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+.share-option:first-of-type { border-top: none; padding-top: 0; }
+.share-option h3 { margin: 0; font-size: .95rem; }
+
+.share-status { font-size: .82rem; color: var(--ink-soft); }
+.share-status:empty { display: none; }
+.share-status.synced { color: var(--accent); font-weight: 600; }
+.share-status.offline, .share-status.error { color: var(--warn); font-weight: 600; }
+
+.share-result { display: flex; flex-direction: column; gap: 10px; align-items: center; text-align: center; margin-top: 12px; }
+.share-result h3 { margin: 0; }
+.share-url { width: 100%; font-size: .8rem; text-align: center; }
+
+/* White quiet zone regardless of theme — scanners need the contrast. */
+.qr {
+  background: #fff;
+  border-radius: 10px;
+  padding: 10px;
+  width: min(280px, 80vw);
+  line-height: 0;
+}
+.qr svg { width: 100%; height: auto; display: block; }
+
+/* Read-only score, styled to sit where the input would. */
+.score-text {
+  font-size: 1.3rem;
+  font-weight: 700;
+  text-align: center;
+  padding: 6px 4px;
+  color: var(--ink);
+}
+.team.winner .score-text { color: var(--accent); }
+
+.app-header.viewer .tournament-tabs { display: none; }
+
 /* ------------------------------------------------------------------ notices */
 
 .notice { font-size: .85rem; padding: 9px 11px; border-radius: 8px; }

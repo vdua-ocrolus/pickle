@@ -54,6 +54,22 @@ phone and runs with no bars, no wifi, no data.
 
 ---
 
+## Letting players watch on their phones
+
+**Data** tab → **Show standings QR**. Hold up the code, people scan it, they see the
+standings on their own phone. They cannot change anything.
+
+It is a snapshot, so show a fresh code after each round.
+
+**Important:** tell everyone to open the tournament link **once while they still have
+signal** — at registration, or the night before. After that their phone has the app and
+scanning works with no internet. Someone who has never opened it and has no signal will
+get a blank page when they scan.
+
+If the venue turns out to have signal and live sharing has been set up, **Publish live**
+gives a link where scores appear as you type them. If your signal drops, keep scoring
+normally — it catches up on its own.
+
 ## Things worth knowing
 
 **Each phone keeps its own scores.** There is no syncing. Whoever is scoring a
@@ -83,6 +99,7 @@ real way to lose the scores.
 | Want different pairings | **Setup** → **Regenerate schedule**. This erases scores already entered. |
 | Scores are wrong / start over | **Schedule** → **Clear all scores** keeps the pairings. **Setup** → **Reset tournament** starts fresh. |
 | Want a backup mid-event | **Data** tab → **Save**. Gives you a restore point you can come back to. |
+| Someone's scan shows a blank page | Their phone has never loaded the app and has no signal. They need to open the link once with a connection. |
 
 ---
 
