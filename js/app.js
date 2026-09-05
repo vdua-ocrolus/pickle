@@ -248,8 +248,8 @@
         field('Courts', numberInput(t.settings.courts, 1, 6, function (value) {
           updateSetting(t, 'courts', value);
         })),
-        field('Round-robin rounds', numberInput(t.settings.rounds, 1, 15, function (value) {
-          updateSetting(t, 'rounds', value);
+        field('Games per player', numberInput(t.settings.gamesPerPlayer, 1, 15, function (value) {
+          updateSetting(t, 'gamesPerPlayer', value);
         })),
         field('Play to', numberInput(t.settings.targetScore, 1, 21, function (value) {
           updateSetting(t, 'targetScore', value);
@@ -296,18 +296,27 @@
     return wrap;
   }
 
+  /* Spells out what the games-per-player target actually costs, since with more
+     players than court space the round count is nothing like the games each. */
   function formatSummary(t, maxGames) {
     if (t.players.length < window.Model.MIN_PLAYERS) {
-      return 'Add players to see how the rounds will look.';
+      return 'Add players to see what this works out to.';
     }
     if (maxGames < 1) return 'Not enough players for a game.';
+
+    const n = t.players.length;
     const seats = maxGames * 4;
-    const sitting = t.players.length - seats;
-    const perPlayer = (seats * t.settings.rounds) / t.players.length;
-    return maxGames + ' game' + (maxGames === 1 ? '' : 's') + ' per round × ' +
-      t.settings.rounds + ' rounds = ' + (maxGames * t.settings.rounds) + ' games. ' +
-      (sitting > 0 ? sitting + ' player' + (sitting === 1 ? '' : 's') + ' sit out each round; ' : '') +
-      'about ' + perPlayer.toFixed(1) + ' games each.';
+    const sitting = n - seats;
+    const rounds = window.Model.resolveRounds(n, t.settings);
+    const slots = rounds * seats;
+    const most = Math.ceil(slots / n);
+    const target = t.settings.gamesPerPlayer;
+
+    return 'Everyone plays at least ' + target + ' game' + (target === 1 ? '' : 's') +
+      (most > target ? ' (some get ' + most + ')' : '') + '. That needs ' +
+      rounds + ' round' + (rounds === 1 ? '' : 's') + ' of ' + maxGames +
+      ' game' + (maxGames === 1 ? '' : 's') + ' — ' + (rounds * maxGames) + ' games in total' +
+      (sitting > 0 ? ', with ' + sitting + ' of ' + n + ' sitting out each round.' : '.');
   }
 
   function numberInput(value, min, max, onCommit) {
@@ -384,7 +393,7 @@
   }
 
   function updateSetting(t, key, value) {
-    if (t.schedule && (key === 'courts' || key === 'rounds')) {
+    if (t.schedule && (key === 'courts' || key === 'gamesPerPlayer')) {
       if (!confirmDestroy(t)) { render(); return; }
       resetPlay(t);
     }

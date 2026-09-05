@@ -104,7 +104,7 @@
   /**
    * Builds the full round-robin schedule up front.
    * @param {Array} players  roster objects with { id, name }
-   * @param {Object} settings { rounds, courts }
+   * @param {Object} settings { courts, gamesPerPlayer } (or a legacy { rounds })
    * @param {Function} [rand] injectable RNG for deterministic tests
    */
   function generateSchedule(players, settings, rand) {
@@ -120,8 +120,9 @@
     const byeCount = {};
     playerIds.forEach(function (id) { byeCount[id] = 0; });
 
+    const rounds = Model.resolveRounds(playerIds.length, settings);
     const schedule = [];
-    for (let r = 1; r <= settings.rounds; r++) {
+    for (let r = 1; r <= rounds; r++) {
       const picked = selectPlaying(playerIds, perRound * 4, byeCount, random);
       picked.byes.forEach(function (id) { byeCount[id] += 1; });
 

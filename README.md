@@ -38,7 +38,7 @@ scored, then round-robin seed. **The top two records win the tournament.**
 ## Using it
 
 1. **Setup** — name the tournament, add 6–24 players (type them in or paste a list),
-   set courts, rounds, and the scoring rule. The summary line tells you how many games
+   set courts, games per player, and the scoring rule. The summary line tells you how many games
    that produces and how many players sit out each round.
 2. **Generate schedule** — the whole round robin is drawn up front, so you can print it.
 3. **Schedule** — enter the final score for each game. Scores are checked against the
@@ -168,12 +168,26 @@ keep the old version.
 | --- | --- | --- |
 | Players | — | 6–24 |
 | Courts | 2 | 1–6 |
-| Round-robin rounds | 6 | 1–15 |
+| Games per player (minimum) | 5 | 1–15 |
 | Play to | 9 | 1–21 |
 | Win by | 1 | 1–2 |
 
-Changing the roster, court count, or round count after a schedule exists redraws it, so
-you are asked to confirm first.
+### Games per player, not rounds
+
+You set how many games **each player** is guaranteed; the app works out the rounds needed.
+The two are nothing alike once there are more players than court space — 15 players on 2
+courts means only 8 are on court per round, so a round is worth about half a game each,
+and 5 games apiece takes 10 rounds. Asking for "5 rounds" there would have given everyone
+2.7 games and a standings table too thin to rank anyone by.
+
+Rounds come out as `ceil(target x players / seats)`. Sit-outs are shared to within one
+round, so the least-played player lands on `floor(rounds x seats / players)` — requiring
+that to reach the target is what makes it a floor rather than an average. Tests sweep
+every roster size from 6 to 24 against 1–6 courts at several targets and assert that the
+*least-played* player always reaches it, and that one fewer round would not.
+
+Changing the roster, court count, or games per player after a schedule exists redraws it,
+so you are asked to confirm first.
 
 ## Data
 

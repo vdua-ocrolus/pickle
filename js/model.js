@@ -12,7 +12,11 @@
 
   const DEFAULT_SETTINGS = {
     courts: 2,
-    rounds: 6,
+    // How many games each player is guaranteed. The number of rounds needed to
+    // deliver that is worked out from the roster and court count — a round is
+    // an implementation detail, and with more players than court space the two
+    // numbers are nothing alike.
+    gamesPerPlayer: 5,
     targetScore: 9,
     winBy: 1,
   };
@@ -56,6 +60,29 @@
   /* Number of games that can run at once, given roster size and court count. */
   function gamesPerRound(playerCount, courts) {
     return Math.max(0, Math.min(courts, Math.floor(playerCount / PLAYERS_PER_GAME)));
+  }
+
+  /**
+   * Rounds needed so that EVERY player gets at least `gamesPerPlayer` games.
+   *
+   * Sit-outs are shared to within one round, so across R rounds the total
+   * player-slots R*seats divide up with the least-played player on
+   * floor(R*seats/n). Requiring that floor to reach the target gives
+   * R >= ceil(target*n/seats).
+   */
+  function roundsForGamesPerPlayer(playerCount, courts, gamesPerPlayer) {
+    const seats = gamesPerRound(playerCount, courts) * PLAYERS_PER_GAME;
+    if (seats < 1) return 0;
+    return Math.ceil((gamesPerPlayer * playerCount) / seats);
+  }
+
+  /* Settings may carry either the new games-per-player target or, for a
+     tournament saved before that existed, a raw round count. */
+  function resolveRounds(playerCount, settings) {
+    if (settings && settings.gamesPerPlayer) {
+      return roundsForGamesPerPlayer(playerCount, settings.courts, settings.gamesPerPlayer);
+    }
+    return (settings && settings.rounds) || 0;
   }
 
   function isGameComplete(game) {
@@ -105,6 +132,8 @@
     createTournament: createTournament,
     defaultState: defaultState,
     gamesPerRound: gamesPerRound,
+    roundsForGamesPerPlayer: roundsForGamesPerPlayer,
+    resolveRounds: resolveRounds,
     isGameComplete: isGameComplete,
     validateScore: validateScore,
     rosterError: rosterError,

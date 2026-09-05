@@ -466,6 +466,72 @@ check('the two draws are named for their levels',
   check('share ids are url-safe', /^[a-z0-9]+$/.test(Share.newShareId()));
 })();
 
+/* --------------------------------------------------- games-per-player target */
+
+// The promise the Setup tab makes is a MINIMUM, so the least-played player in
+// every configuration is what has to be checked -- not the average.
+(function gamesPerPlayerTest() {
+  let worstShortfall = 0;
+  let configs = 0;
+
+  for (let n = Model.MIN_PLAYERS; n <= Model.MAX_PLAYERS; n++) {
+    for (const courts of [1, 2, 3, 4, 6]) {
+      if (Model.gamesPerRound(n, courts) < 1) continue;
+      for (const target of [3, 5, 6, 8]) {
+        const settings = { courts: courts, gamesPerPlayer: target, targetScore: 9, winBy: 1 };
+        const rounds = Model.roundsForGamesPerPlayer(n, courts, target);
+        const tag = n + 'p/' + courts + 'ct/' + target + 'g';
+        configs += 1;
+
+        const players = roster(n);
+        const schedule = Scheduler.generateSchedule(players, settings, seeded(n * 31 + courts * 7 + target));
+        check('rounds match the resolver (' + tag + ')', schedule.length === rounds);
+
+        const played = {};
+        players.forEach(function (p) { played[p.id] = 0; });
+        schedule.forEach(function (round) {
+          round.games.forEach(function (g) {
+            g.teamA.concat(g.teamB).forEach(function (id) { played[id] += 1; });
+          });
+        });
+        const counts = Object.keys(played).map(function (k) { return played[k]; });
+        const least = Math.min.apply(null, counts);
+        const most = Math.max.apply(null, counts);
+
+        check('nobody falls short of the target (' + tag + ')', least >= target,
+          'least played ' + least + ' of ' + target);
+        check('games stay within one of each other (' + tag + ')', most - least <= 1,
+          least + '-' + most);
+        if (least < target) worstShortfall = Math.max(worstShortfall, target - least);
+      }
+    }
+  }
+  check('no configuration shorted anyone', worstShortfall === 0, 'worst shortfall ' + worstShortfall);
+  check('the sweep actually covered a lot of ground', configs > 200, configs + ' configs');
+
+  // No wasted rounds either: one fewer would miss the target.
+  for (const [n, c, target] of [[15, 2, 5], [15, 2, 6], [11, 2, 5], [26, 4, 5], [13, 2, 5]]) {
+    const r = Model.roundsForGamesPerPlayer(n, c, target);
+    const seats = Model.gamesPerRound(n, c) * 4;
+    check('rounds are the minimum needed (' + n + 'p/' + c + 'ct/' + target + 'g)',
+      Math.floor((r - 1) * seats / n) < target,
+      r + ' rounds may be one too many');
+  }
+
+  // The worked examples from planning the real event.
+  check('15 players on 2 courts need 10 rounds for 5 games', Model.roundsForGamesPerPlayer(15, 2, 5) === 10);
+  check('15 players on 2 courts need 12 rounds for 6 games', Model.roundsForGamesPerPlayer(15, 2, 6) === 12);
+  check('11 players on 2 courts need 7 rounds for 5 games', Model.roundsForGamesPerPlayer(11, 2, 5) === 7);
+  check('26 players on 4 courts need 9 rounds for 5 games', Model.roundsForGamesPerPlayer(26, 4, 5) === 9);
+
+  // A legacy tournament saved with a raw round count still resolves.
+  check('a legacy rounds setting still works',
+    Model.resolveRounds(12, { courts: 2, rounds: 7 }) === 7);
+  check('games-per-player wins when both are present',
+    Model.resolveRounds(15, { courts: 2, rounds: 99, gamesPerPlayer: 5 }) === 10);
+  check('the default target is five', Model.DEFAULT_SETTINGS.gamesPerPlayer === 5);
+})();
+
 /* ------------------------------------------------------------------ report */
 
 if (failures.length) {
