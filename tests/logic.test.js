@@ -1,0 +1,813 @@
+/* Dependency-free checks for the tournament logic.  Run: node tests/logic.test.js */
+'use strict';
+
+const Model = require('../js/model.js');
+const Scheduler = require('../js/scheduler.js');
+const Standings = require('../js/standings.js');
+const Finals = require('../js/finals.js');
+const Snapshots = require('../js/snapshots.js');
+const Demo = require('../js/demo.js');
+const Share = require('../js/share.js');
+const Roster = require('../js/roster.js');
+
+let passed = 0;
+const failures = [];
+
+function check(label, condition, detail) {
+  if (condition) { passed += 1; return; }
+  failures.push(label + (detail ? ' — ' + detail : ''));
+}
+
+function roster(n) {
+  const players = [];
+  for (let i = 1; i <= n; i++) players.push(Model.createPlayer('Player ' + i));
+  return players;
+}
+
+/* A small deterministic RNG so a failure can be reproduced. */
+function seeded(seed) {
+  let s = seed >>> 0;
+  return function () {
+    s = (s * 1664525 + 1013904223) >>> 0;
+    return s / 4294967296;
+  };
+}
+
+/* ------------------------------------------------------------- scheduling */
+
+for (let n = Model.MIN_PLAYERS; n <= Model.MAX_PLAYERS; n++) {
+  for (const courts of [1, 2, 3, 4]) {
+    const players = roster(n);
+    const settings = { courts: courts, rounds: 6, targetScore: 9, winBy: 1 };
+    const expectedGames = Model.gamesPerRound(n, courts);
+    if (expectedGames < 1) continue;
+
+    const schedule = Scheduler.generateSchedule(players, settings, seeded(n * 100 + courts));
+    const ids = players.map(function (p) { return p.id; });
+    const tag = n + ' players / ' + courts + ' courts';
+
+    check('rounds generated (' + tag + ')', schedule.length === 6);
+
+    schedule.forEach(function (round) {
+      const seen = [];
+      round.games.forEach(function (g) { seen.push.apply(seen, g.teamA.concat(g.teamB)); });
+      check('games per round (' + tag + ')', round.games.length === expectedGames);
+      check('nobody plays twice in a round (' + tag + ')', new Set(seen).size === seen.length);
+      check('everyone is placed (' + tag + ')',
+        seen.length + round.byes.length === n,
+        seen.length + ' playing + ' + round.byes.length + ' byes != ' + n);
+      check('byes do not overlap play (' + tag + ')',
+        round.byes.every(function (id) { return seen.indexOf(id) === -1; }));
+      check('court numbers are unique (' + tag + ')',
+        new Set(round.games.map(function (g) { return g.court; })).size === round.games.length);
+    });
+
+    const quality = Scheduler.scheduleQuality(schedule, ids);
+    check('sit-outs are shared evenly (' + tag + ')', quality.byeSpread <= 1,
+      'spread of ' + quality.byeSpread);
+
+    // With enough distinct players a six-round draw should never repeat a partner.
+    if (n >= 12) {
+      check('no repeat partners (' + tag + ')', quality.maxPartnerRepeats <= 1,
+        'a pair partnered ' + quality.maxPartnerRepeats + ' times');
+    }
+  }
+}
+
+check('too few players is rejected', (function () {
+  try {
+    Scheduler.generateSchedule(roster(3), { courts: 1, rounds: 3 });
+    return false;
+  } catch (err) { return true; }
+})());
+
+/* ------------------------------------------------------------- validation */
+
+check('9-6 is a valid finish', Model.validateScore(9, 6, 9, 1) === null);
+check('9-8 is a valid finish', Model.validateScore(9, 8, 9, 1) === null);
+check('8-6 is unfinished', Model.validateScore(8, 6, 9, 1) !== null);
+check('a tie is rejected', Model.validateScore(9, 9, 9, 1) !== null);
+check('11-9 is rejected when playing to 9', Model.validateScore(11, 9, 9, 1) !== null);
+check('win-by-2 rejects 9-8', Model.validateScore(9, 8, 9, 2) !== null);
+check('win-by-2 accepts 10-8', Model.validateScore(10, 8, 9, 2) === null);
+check('negative scores are rejected', Model.validateScore(-1, 9, 9, 1) !== null);
+
+check('roster below the minimum is flagged', Model.rosterError(roster(5)) !== null);
+check('roster above the maximum is flagged', Model.rosterError(roster(25)) !== null);
+check('a valid roster passes', Model.rosterError(roster(12)) === null);
+check('duplicate names are flagged',
+  Model.rosterError([Model.createPlayer('Ann'), Model.createPlayer('ann')].concat(roster(5))) !== null);
+
+/* -------------------------------------------------------------- standings */
+
+(function standingsTest() {
+  const players = roster(8);
+  const tournament = {
+    players: players,
+    settings: { courts: 2, rounds: 5, targetScore: 9, winBy: 1 },
+    schedule: Scheduler.generateSchedule(players, { courts: 2, rounds: 5 }, seeded(7)),
+  };
+
+  const progress0 = Standings.roundRobinProgress(tournament);
+  check('progress starts at zero', progress0.done === 0 && progress0.complete === false);
+
+  // Player 1 wins every game they play 9-2; everything else goes to team A 9-7.
+  const hero = players[0].id;
+  tournament.schedule.forEach(function (round) {
+    round.games.forEach(function (game) {
+      const heroOnA = game.teamA.indexOf(hero) !== -1;
+      const heroOnB = game.teamB.indexOf(hero) !== -1;
+      if (heroOnB) { game.scoreA = 2; game.scoreB = 9; }
+      else if (heroOnA) { game.scoreA = 9; game.scoreB = 2; }
+      else { game.scoreA = 9; game.scoreB = 7; }
+    });
+  });
+
+  const progress = Standings.roundRobinProgress(tournament);
+  check('progress reaches complete', progress.complete === true);
+
+  const table = Standings.compute(tournament);
+  check('every player appears once', table.length === 8);
+  check('the undefeated player is first', table[0].playerId === hero);
+  check('the undefeated player has no losses', table[0].l === 0);
+  check('first place is rank 1', table[0].rank === 1);
+
+  const totalGames = table.reduce(function (sum, row) { return sum + row.gp; }, 0);
+  check('game participation adds up', totalGames === progress.done * 4);
+
+  const pf = table.reduce(function (sum, row) { return sum + row.pf; }, 0);
+  const pa = table.reduce(function (sum, row) { return sum + row.pa; }, 0);
+  check('points for and against balance', pf === pa);
+
+  const ranks = table.map(function (row) { return row.rank; });
+  check('ranks never decrease', ranks.every(function (r, i) { return i === 0 || r >= ranks[i - 1]; }));
+})();
+
+(function tieTest() {
+  const players = roster(6);
+  const table = Standings.compute({
+    players: players,
+    schedule: [{
+      round: 1,
+      byes: [players[4].id, players[5].id],
+      games: [{ teamA: [players[0].id, players[1].id], teamB: [players[2].id, players[3].id], scoreA: 9, scoreB: 8 }],
+    }],
+  });
+  check('winners share rank 1', table[0].rank === 1 && table[1].rank === 1);
+  check('shared ranks are marked tied', table[0].tied === true);
+  check('byes are counted', table.filter(function (r) { return r.byes === 1; }).length === 2);
+})();
+
+/* ----------------------------------------------------------------- finals */
+
+(function finalsTest() {
+  const players = roster(4);
+  const ids = players.map(function (p) { return p.id; });
+  const byId = {};
+  players.forEach(function (p) { byId[p.id] = p; });
+
+  const finals = Finals.start(ids);
+  check('finals has three games', finals.games.length === 3);
+
+  const partnerships = new Set();
+  finals.games.forEach(function (g) {
+    partnerships.add(g.teamA.slice().sort().join('|'));
+    partnerships.add(g.teamB.slice().sort().join('|'));
+  });
+  check('every partner combination is used exactly once', partnerships.size === 6);
+
+  finals.games.forEach(function (g) {
+    check('finalists are not on both sides', new Set(g.teamA.concat(g.teamB)).size === 4);
+  });
+
+  check('an incomplete finals has no champions', Finals.champions(finals, byId).length === 0);
+
+  // Seeds 1 and 2 take every game they are on the winning side of.
+  finals.games[0].scoreA = 9; finals.games[0].scoreB = 5; // 1&4 beat 2&3
+  finals.games[1].scoreA = 9; finals.games[1].scoreB = 3; // 1&3 beat 2&4
+  finals.games[2].scoreA = 9; finals.games[2].scoreB = 1; // 1&2 beat 3&4
+
+  check('completed finals is detected', Finals.isComplete(finals) === true);
+  const champions = Finals.champions(finals, byId);
+  check('exactly two champions', champions.length === 2);
+  check('seed 1 wins out', champions[0].playerId === ids[0] && champions[0].w === 3);
+
+  const results = Finals.compute(finals, byId);
+  check('every finalist plays all three games', results.every(function (r) { return r.gp === 3; }));
+  check('six wins are distributed', results.reduce(function (s, r) { return s + r.w; }, 0) === 6);
+
+  check('finals reject a duplicate finalist', (function () {
+    try { Finals.start([ids[0], ids[0], ids[1], ids[2]]); return false; } catch (e) { return true; }
+  })());
+  check('finals reject the wrong player count', (function () {
+    try { Finals.start(ids.slice(0, 3)); return false; } catch (e) { return true; }
+  })());
+})();
+
+/* -------------------------------------------------------------- snapshots */
+
+(function snapshotTest() {
+  // Stand-in for localStorage.
+  const backing = {};
+  const store = Snapshots.createStore({
+    getItem: function (k) { return Object.prototype.hasOwnProperty.call(backing, k) ? backing[k] : null; },
+    setItem: function (k, v) { backing[k] = String(v); },
+    removeItem: function (k) { delete backing[k]; },
+  });
+
+  check('an empty store lists nothing', store.list().length === 0);
+
+  const state = Model.defaultState();
+  state.tournaments[0].players = roster(8);
+
+  const first = store.add('Before finals', state, 'eight players');
+  check('a save succeeds', first.ok === true);
+  check('the save is listed', store.list().length === 1);
+  check('the summary is kept', store.list()[0].summary === 'eight players');
+  check('an unnamed save is rejected', store.add('   ', state).ok === false);
+
+  // Mutating live state must not reach into the stored snapshot.
+  state.tournaments[0].players = [];
+  state.tournaments[0].name = 'Changed';
+  const restored = store.restore(first.snapshot.id);
+  check('restore is isolated from later edits', restored.tournaments[0].players.length === 8);
+  check('restore keeps the saved name',
+    restored.tournaments[0].name === Model.DEFAULT_NAMES[0],
+    'got ' + restored.tournaments[0].name);
+
+  // Editing what restore handed back must not reach into the snapshot either.
+  restored.tournaments[0].players = [];
+  check('restore returns a fresh copy each time',
+    store.restore(first.snapshot.id).tournaments[0].players.length === 8);
+
+  check('restoring an unknown id returns null', store.restore('nope') === null);
+
+  store.add('Second', state, '');
+  check('a second save is kept alongside the first', store.list().length === 2);
+  // Same-millisecond saves must still order newest-first, not arbitrarily.
+  check('newest sorts first', store.list()[0].name === 'Second');
+  store.add('Third', state, '');
+  check('newest of three sorts first', store.list()[0].name === 'Third');
+  check('older saves keep their order', store.list()[1].name === 'Second');
+
+  store.remove(first.snapshot.id);
+  const left = store.list();
+  const leftNames = left.map(function (s2) { return s2.name; });
+  check('delete removes only its own save',
+    left.length === 2 && leftNames.indexOf('Before finals') === -1,
+    'left behind: ' + leftNames.join(', '));
+
+  // Fill to the cap and confirm it refuses rather than silently dropping saves.
+  while (store.list().length < Snapshots.MAX_SNAPSHOTS) store.add('filler', state, '');
+  const overflow = store.add('one too many', state, '');
+  check('saves are capped', overflow.ok === false);
+  check('the cap message names the limit', /\d+/.test(overflow.error));
+
+  store.clear();
+  check('clear empties the store', store.list().length === 0);
+
+  // A full disk surfaces as an error, not a crash.
+  const fullStore = Snapshots.createStore({
+    getItem: function () { return null; },
+    setItem: function () { throw new Error('QuotaExceededError'); },
+    removeItem: function () {},
+  });
+  const failed = fullStore.add('no room', state, '');
+  check('a storage failure is reported, not thrown', failed.ok === false && !!failed.error);
+})();
+
+/* ------------------------------------------------------- random score fill */
+
+(function fillTest() {
+  [{ targetScore: 9, winBy: 1 }, { targetScore: 11, winBy: 2 }, { targetScore: 15, winBy: 2 }]
+    .forEach(function (rule) {
+      const players = roster(10);
+      const settings = Object.assign({ courts: 2, rounds: 5 }, rule);
+      const tournament = {
+        name: 'Fill test',
+        players: players,
+        settings: settings,
+        schedule: Scheduler.generateSchedule(players, settings, seeded(21)),
+        finals: null,
+      };
+      const tag = 'to ' + rule.targetScore + ' win by ' + rule.winBy;
+
+      const expected = Demo.countFillable(tournament);
+      const result = Demo.fill(tournament, {}, seeded(99));
+      check('fill count matches the estimate (' + tag + ')', result.roundRobin === expected);
+      check('fill reports no finals when there are none (' + tag + ')', result.finals === 0);
+
+      const progress = Standings.roundRobinProgress(tournament);
+      check('a fill completes the round robin (' + tag + ')', progress.complete === true);
+
+      // The whole point: nothing it writes may be a score the app would reject.
+      let illegal = 0;
+      let decided = 0;
+      tournament.schedule.forEach(function (round) {
+        round.games.forEach(function (g) {
+          if (Model.validateScore(g.scoreA, g.scoreB, rule.targetScore, rule.winBy)) illegal += 1;
+          if (g.scoreA !== g.scoreB) decided += 1;
+        });
+      });
+      check('every filled score is legal (' + tag + ')', illegal === 0, illegal + ' illegal');
+      check('no filled game is a tie (' + tag + ')', decided === expected);
+
+      // Standings must balance, which they only do if the fill is self-consistent.
+      const table = Standings.compute(tournament);
+      const pf = table.reduce(function (s2, r) { return s2 + r.pf; }, 0);
+      const pa = table.reduce(function (s2, r) { return s2 + r.pa; }, 0);
+      check('filled results balance (' + tag + ')', pf === pa);
+    });
+})();
+
+(function fillOverwriteTest() {
+  const players = roster(8);
+  const settings = { courts: 2, rounds: 4, targetScore: 9, winBy: 1 };
+  const tournament = {
+    name: 'Overwrite test',
+    players: players,
+    settings: settings,
+    schedule: Scheduler.generateSchedule(players, settings, seeded(5)),
+    finals: null,
+  };
+
+  // Pin one game by hand; a non-overwriting fill must leave it alone.
+  const pinned = tournament.schedule[0].games[0];
+  pinned.scoreA = 9;
+  pinned.scoreB = 0;
+
+  const all = Demo.countFillable(tournament, { overwrite: true });
+  const empties = Demo.countFillable(tournament);
+  check('a scored game is excluded from the empty count', empties === all - 1);
+
+  Demo.fill(tournament, {}, seeded(3));
+  check('fill leaves an existing score untouched', pinned.scoreA === 9 && pinned.scoreB === 0);
+
+  // Re-roll may legitimately land on the same numbers, so check the call reports
+  // the game as touched rather than guessing from the values.
+  const rerolled = Demo.fill(tournament, { overwrite: true }, seeded(4));
+  check('re-roll touches every game', rerolled.roundRobin === all);
+
+  // Finals get filled too, so one click can reach a champion.
+  const standings = Standings.compute(tournament);
+  tournament.finals = Finals.start(standings.slice(0, 4).map(function (r) { return r.playerId; }));
+  const withFinals = Demo.fill(tournament, {}, seeded(11));
+  check('finals are filled', withFinals.finals === 3);
+  check('round robin was already full', withFinals.roundRobin === 0);
+
+  const byId = {};
+  players.forEach(function (p) { byId[p.id] = p; });
+  check('a filled finals produces two champions', Finals.champions(tournament.finals, byId).length === 2);
+
+  // Opting out of the finals must leave them alone.
+  tournament.finals.games.forEach(function (g) { g.scoreA = null; g.scoreB = null; });
+  const skipped = Demo.fill(tournament, { includeFinals: false }, seeded(12));
+  check('finals can be skipped', skipped.finals === 0);
+  check('skipped finals stay empty', Finals.isComplete(tournament.finals) === false);
+})();
+
+/* ---------------------------------------------------------- default naming */
+
+check('the two draws are named for their levels',
+  Model.DEFAULT_NAMES.join(' / ') === 'Advanced / Intermediate');
+(function () {
+  const fresh = Model.defaultState();
+  check('a fresh state uses the level names',
+    fresh.tournaments[0].name === 'Advanced' && fresh.tournaments[1].name === 'Intermediate');
+  check('the two draws stay independent', fresh.tournaments[0].id !== fresh.tournaments[1].id);
+  check('legacy names are still known for migration', Model.LEGACY_NAMES.length === 2);
+})();
+
+/* ------------------------------------------------------------- share links */
+
+(function shareTest() {
+  const players = roster(12);
+  const settings = { courts: 2, rounds: 4, targetScore: 9, winBy: 1 };
+  const tournament = {
+    name: 'Advanced',
+    players: players,
+    settings: settings,
+    schedule: Scheduler.generateSchedule(players, settings, seeded(31)),
+    finals: null,
+  };
+  Demo.fill(tournament, {}, seeded(32));
+
+  check('base64url survives a round trip', Share.decode64(Share.encode64('hello')) === 'hello');
+  check('base64url handles non-ASCII names',
+    Share.decode64(Share.encode64('Renée Ökonomou 李')) === 'Renée Ökonomou 李');
+  check('base64url output is URL-safe', /^[A-Za-z0-9_-]*$/.test(Share.encode64('??>>>~~~###')));
+
+  const encoded = Share.encodeSnapshot(tournament);
+  const snap = Share.decodeSnapshot(encoded);
+  check('a snapshot decodes', snap !== null);
+  check('the snapshot carries the name', snap.name === 'Advanced');
+  check('the snapshot carries every player', snap.tournament.players.length === 12);
+
+  // Individual game results ride along, not just the finished table.
+  const sentGames = snap.tournament.schedule.reduce(function (n, r) { return n + r.games.length; }, 0);
+  const ownGames = tournament.schedule.reduce(function (n, r) { return n + r.games.length; }, 0);
+  check('every game is carried', sentGames === ownGames, sentGames + ' of ' + ownGames);
+  check('every round is carried', snap.tournament.schedule.length === tournament.schedule.length);
+
+  const sentScores = [];
+  const ownScores = [];
+  snap.tournament.schedule.forEach(function (r) {
+    r.games.forEach(function (g) { sentScores.push(g.scoreA + '-' + g.scoreB); });
+  });
+  tournament.schedule.forEach(function (r) {
+    r.games.forEach(function (g) { ownScores.push(g.scoreA + '-' + g.scoreB); });
+  });
+  check('every score survives the round trip', sentScores.join() === ownScores.join());
+
+  // Pairings have to survive too, or the results read as someone else's games.
+  const sentPairs = [];
+  const ownPairs = [];
+  snap.tournament.schedule.forEach(function (r) {
+    r.games.forEach(function (g) {
+      sentPairs.push(g.teamA.concat(g.teamB).map(function (id) {
+        return snap.tournament.players.find(function (p) { return p.id === id; }).name;
+      }).join('/'));
+    });
+  });
+  tournament.schedule.forEach(function (r) {
+    r.games.forEach(function (g) {
+      ownPairs.push(g.teamA.concat(g.teamB).map(function (id) {
+        return tournament.players.find(function (p) { return p.id === id; }).name;
+      }).join('/'));
+    });
+  });
+  check('every pairing survives the round trip', sentPairs.join() === ownPairs.join());
+
+  // Sit-outs are not transmitted; they are worked out from who is not playing.
+  const sentByes = snap.tournament.schedule.map(function (r) { return r.byes.length; }).join();
+  const ownByes = tournament.schedule.map(function (r) { return r.byes.length; }).join();
+  check('sit-outs are reconstructed correctly', sentByes === ownByes);
+
+  // Standings computed at the viewer must equal the organiser's, exactly.
+  const local = Standings.compute(tournament);
+  const remote = Standings.compute(snap.tournament);
+  check('viewer standings match the organiser exactly',
+    JSON.stringify(local.map(function (r) { return [r.name, r.gp, r.w, r.l, r.pf, r.pa, r.byes, r.rank]; })) ===
+    JSON.stringify(remote.map(function (r) { return [r.name, r.gp, r.w, r.l, r.pf, r.pa, r.byes, r.rank]; })));
+
+  // A part-played tournament must round trip too — unscored games stay unscored.
+  const partial = {
+    name: 'Half done', players: players, settings: settings,
+    schedule: Scheduler.generateSchedule(players, settings, seeded(41)), finals: null,
+  };
+  partial.schedule.slice(0, 2).forEach(function (round) {
+    Demo.fill({ settings: settings, schedule: [round], finals: null }, {}, seeded(42));
+  });
+  const partSnap = Share.decodeSnapshot(Share.encodeSnapshot(partial));
+  const doneBefore = Standings.roundRobinProgress(partial);
+  const doneAfter = Standings.roundRobinProgress(partSnap.tournament);
+  check('a part-played snapshot keeps its progress',
+    doneBefore.done === doneAfter.done && doneBefore.total === doneAfter.total,
+    doneBefore.done + '/' + doneBefore.total + ' vs ' + doneAfter.done + '/' + doneAfter.total);
+
+  // The compact form drops the games when a full code would not scan.
+  const compact = Share.decodeSnapshot(Share.encodeSnapshot(tournament, true));
+  check('a compact snapshot decodes', compact !== null && !!compact.legacyRows);
+  check('a compact snapshot still has every player', compact.legacyRows.length === 12);
+  // Compact only has to win where it is actually used: lots of games. For a
+  // small draw the results encoding is so tight that it costs no more than the
+  // finished table, which is why full is the default.
+  const busy = { name: 'Busy', players: roster(24), settings: { courts: 6, gamesPerPlayer: 15, targetScore: 9, winBy: 1 }, finals: null };
+  busy.schedule = Scheduler.generateSchedule(busy.players, busy.settings, seeded(61));
+  Demo.fill(busy, {}, seeded(62));
+  check('compact is smaller when there are many games',
+    Share.encodeSnapshot(busy, true).length < Share.encodeSnapshot(busy).length,
+    Share.encodeSnapshot(busy, true).length + ' vs ' + Share.encodeSnapshot(busy).length);
+  check('even the busiest full snapshot is encodable',
+    Share.encodeSnapshot(busy).length < 2900,
+    Share.encodeSnapshot(busy).length + ' chars');
+
+  // A QR has to physically fit, so the worst case matters.
+  const big = roster(Model.MAX_PLAYERS).map(function (p, i) {
+    return Object.assign({}, p, { name: 'Verylongname Player ' + (i + 1) });
+  });
+  const bigT = {
+    name: 'A Long Tournament Name',
+    players: big,
+    settings: settings,
+    schedule: Scheduler.generateSchedule(big, settings, seeded(33)),
+    finals: null,
+  };
+  Demo.fill(bigT, {}, seeded(34));
+  const bigEncoded = Share.encodeSnapshot(bigT);
+  check('a full 24-player snapshot stays QR-sized', bigEncoded.length < 2000,
+    bigEncoded.length + ' chars');
+  check('the big snapshot still decodes',
+    Share.decodeSnapshot(bigEncoded).tournament.players.length === 24);
+
+  // Champions ride along once the finals are done.
+  const top4 = Standings.compute(tournament).slice(0, 4).map(function (r) { return r.playerId; });
+  tournament.finals = Finals.start(top4);
+  Demo.fill(tournament, {}, seeded(35));
+  const done = Share.decodeSnapshot(Share.encodeSnapshot(tournament));
+  const byIdSnap = {};
+  done.tournament.players.forEach(function (p) { byIdSnap[p.id] = p; });
+  check('the finals are carried', done.tournament.finals !== null);
+  check('champions are derivable once decided',
+    Finals.champions(done.tournament.finals, byIdSnap).length === 2);
+  check('the viewer names the same champions',
+    Finals.champions(done.tournament.finals, byIdSnap).map(function (c) { return c.name; }).join() ===
+    Finals.champions(tournament.finals, (function () {
+      const m = {}; tournament.players.forEach(function (p) { m[p.id] = p; }); return m;
+    })()).map(function (c) { return c.name; }).join());
+
+  // Bad input must fail softly — a half-scanned QR should not break the page.
+  check('garbage decodes to null', Share.decodeSnapshot('!!!!not-base64!!!!') === null);
+  check('truncated payload decodes to null', Share.decodeSnapshot(encoded.slice(0, 40)) === null);
+  check('empty payload decodes to null', Share.decodeSnapshot('') === null);
+  check('valid base64 of the wrong thing decodes to null',
+    Share.decodeSnapshot(Share.encode64('{\"hello\":1}')) === null);
+  check('a game referencing an unknown player is rejected',
+    Share.decodeSnapshot(Share.encode64(JSON.stringify(
+      { v: 2, n: 'x', p: ['A', 'B', 'C', 'D'], r: [[[0, 1, 2, 99]]] }))) === null);
+  check('a link from the previous format still opens',
+    Share.decodeSnapshot(Share.encode64(JSON.stringify(
+      { v: 1, n: 'Old', d: 1, t: 1, c: null, r: [['Ann', 1, 0, 9, 3, 0]] }))).legacyRows.length === 1);
+
+  // URL mode detection drives which app the browser boots into.
+  check('a bare url is admin', Share.readMode('').mode === 'admin');
+  check('an unknown fragment is admin', Share.readMode('#something').mode === 'admin');
+  const liveMode = Share.readMode('#live=abc123xyz');
+  check('a live link is detected', liveMode.mode === 'live' && liveMode.shareId === 'abc123xyz');
+  check('a snapshot link is detected', Share.readMode('#snap=' + encoded).mode === 'snapshot');
+  check('a snapshot link keeps its payload', Share.readMode('#snap=' + encoded).payload === encoded);
+
+  const url = Share.snapshotUrl('https://example.com/pickle/#live=old', tournament);
+  check('building a url replaces any existing fragment',
+    url.indexOf('#snap=') > 0 && url.indexOf('live=old') === -1);
+  check('the live url points at the share id',
+    Share.liveUrl('https://example.com/pickle/', 'zzz') === 'https://example.com/pickle/#live=zzz');
+
+  // Ids are the read capability, so they must not collide or be guessable.
+  const ids = {};
+  for (let i = 0; i < 500; i++) ids[Share.newShareId()] = true;
+  check('share ids are unique across 500 draws', Object.keys(ids).length === 500);
+  check('share ids are long enough to be unguessable', Share.newShareId().length >= 16);
+  check('share ids are url-safe', /^[a-z0-9]+$/.test(Share.newShareId()));
+})();
+
+/* --------------------------------------------------- games-per-player target */
+
+// The promise the Setup tab makes is a MINIMUM, so the least-played player in
+// every configuration is what has to be checked -- not the average.
+(function gamesPerPlayerTest() {
+  let worstShortfall = 0;
+  let configs = 0;
+
+  for (let n = Model.MIN_PLAYERS; n <= Model.MAX_PLAYERS; n++) {
+    for (const courts of [1, 2, 3, 4, 6]) {
+      if (Model.gamesPerRound(n, courts) < 1) continue;
+      for (const target of [3, 5, 6, 8]) {
+        const settings = { courts: courts, gamesPerPlayer: target, targetScore: 9, winBy: 1 };
+        const rounds = Model.roundsForGamesPerPlayer(n, courts, target);
+        const tag = n + 'p/' + courts + 'ct/' + target + 'g';
+        configs += 1;
+
+        const players = roster(n);
+        const schedule = Scheduler.generateSchedule(players, settings, seeded(n * 31 + courts * 7 + target));
+        check('rounds match the resolver (' + tag + ')', schedule.length === rounds);
+
+        const played = {};
+        players.forEach(function (p) { played[p.id] = 0; });
+        schedule.forEach(function (round) {
+          round.games.forEach(function (g) {
+            g.teamA.concat(g.teamB).forEach(function (id) { played[id] += 1; });
+          });
+        });
+        const counts = Object.keys(played).map(function (k) { return played[k]; });
+        const least = Math.min.apply(null, counts);
+        const most = Math.max.apply(null, counts);
+
+        check('nobody falls short of the target (' + tag + ')', least >= target,
+          'least played ' + least + ' of ' + target);
+        check('games stay within one of each other (' + tag + ')', most - least <= 1,
+          least + '-' + most);
+        if (least < target) worstShortfall = Math.max(worstShortfall, target - least);
+      }
+    }
+  }
+  check('no configuration shorted anyone', worstShortfall === 0, 'worst shortfall ' + worstShortfall);
+  check('the sweep actually covered a lot of ground', configs > 200, configs + ' configs');
+
+  // No wasted rounds either: one fewer would miss the target.
+  for (const [n, c, target] of [[15, 2, 5], [15, 2, 6], [11, 2, 5], [26, 4, 5], [13, 2, 5]]) {
+    const r = Model.roundsForGamesPerPlayer(n, c, target);
+    const seats = Model.gamesPerRound(n, c) * 4;
+    check('rounds are the minimum needed (' + n + 'p/' + c + 'ct/' + target + 'g)',
+      Math.floor((r - 1) * seats / n) < target,
+      r + ' rounds may be one too many');
+  }
+
+  // The worked examples from planning the real event.
+  check('15 players on 2 courts need 10 rounds for 5 games', Model.roundsForGamesPerPlayer(15, 2, 5) === 10);
+  check('15 players on 2 courts need 12 rounds for 6 games', Model.roundsForGamesPerPlayer(15, 2, 6) === 12);
+  check('11 players on 2 courts need 7 rounds for 5 games', Model.roundsForGamesPerPlayer(11, 2, 5) === 7);
+  check('26 players on 4 courts need 9 rounds for 5 games', Model.roundsForGamesPerPlayer(26, 4, 5) === 9);
+
+  // A legacy tournament saved with a raw round count still resolves.
+  check('a legacy rounds setting still works',
+    Model.resolveRounds(12, { courts: 2, rounds: 7 }) === 7);
+  check('games-per-player wins when both are present',
+    Model.resolveRounds(15, { courts: 2, rounds: 99, gamesPerPlayer: 5 }) === 10);
+  check('the default target is five', Model.DEFAULT_SETTINGS.gamesPerPlayer === 5);
+})();
+
+/* ------------------------------------------------- offline cache freshness */
+
+// sw.js serves cache-first, so a changed file that ships without a new
+// CACHE_VERSION never reaches a device that already has the app. That is easy
+// to forget and invisible when it happens, so it is checked here instead.
+(function cacheVersionTest() {
+  const fs = require('fs');
+  const path = require('path');
+  const crypto = require('crypto');
+  const root = path.join(__dirname, '..');
+
+  const sw = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
+  const version = (sw.match(/CACHE_VERSION\s*=\s*'([^']+)'/) || [])[1];
+  check('sw.js declares a cache version', !!version);
+
+  const listed = (sw.match(/const PRECACHE = \[([\s\S]*?)\];/) || [])[1] || '';
+  const files = listed.split('\n')
+    .map(function (line) { return (line.match(/'([^']+)'/) || [])[1]; })
+    .filter(Boolean)
+    .map(function (f) { return f === './' ? 'index.html' : f; });
+
+  check('the precache list is not empty', files.length > 5, files.length + ' entries');
+
+  const missing = files.filter(function (f) { return !fs.existsSync(path.join(root, f)); });
+  check('every precached file exists', missing.length === 0, 'missing: ' + missing.join(', '));
+
+  // Anything the app loads at runtime must also be precached, or it breaks offline.
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const scripts = [];
+  const re = /<script src="([^"]+)"/g;
+  let m;
+  while ((m = re.exec(html))) scripts.push(m[1]);
+  const unlisted = scripts.filter(function (src) { return files.indexOf(src) === -1; });
+  check('every script tag is precached', unlisted.length === 0, 'not cached: ' + unlisted.join(', '));
+
+  const hash = crypto.createHash('sha256');
+  files.slice().sort().forEach(function (f) {
+    hash.update(f);
+    hash.update(fs.readFileSync(path.join(root, f)));
+  });
+  const fingerprint = hash.digest('hex').slice(0, 16);
+  const recorded = (sw.match(/PRECACHE_FINGERPRINT:\s*([a-f0-9]+)/) || [])[1];
+
+  // The footer version is only useful if it cannot drift from the real cache.
+  const config = fs.readFileSync(path.join(root, 'js', 'config.js'), 'utf8');
+  const appVersion = (config.match(/APP_VERSION:\s*'([^']+)'/) || [])[1];
+  check('the displayed version matches the cache version', appVersion === version,
+    'footer says ' + appVersion + ', cache is ' + version);
+
+  check('the cached files match the recorded fingerprint',
+    fingerprint === recorded,
+    'files changed. Bump CACHE_VERSION (now ' + version +
+    ') and set PRECACHE_FINGERPRINT to ' + fingerprint);
+})();
+
+/* ---------------------------------------------------- mid-tournament drops */
+
+// The promise: a game that has been played is never altered. Everything else
+// follows from that, so it is what these check hardest.
+function midTournament(n, courts, playedRounds, seed) {
+  const players = roster(n);
+  const settings = { courts: courts, gamesPerPlayer: 5, targetScore: 9, winBy: 1 };
+  const t = {
+    name: 'Drop test', players: players, settings: settings,
+    schedule: Scheduler.generateSchedule(players, settings, seeded(seed)), finals: null,
+  };
+  // Play the first few rounds.
+  t.schedule.slice(0, playedRounds).forEach(function (round) {
+    Demo.fill({ settings: settings, schedule: [round], finals: null }, {}, seeded(seed + 1));
+  });
+  return t;
+}
+
+function snapshotPlayed(t) {
+  const out = [];
+  t.schedule.forEach(function (r) {
+    r.games.forEach(function (g) {
+      if (Model.isGameComplete(g)) {
+        out.push(r.round + ':' + g.teamA.join('+') + 'v' + g.teamB.join('+') + '=' + g.scoreA + '-' + g.scoreB);
+      }
+    });
+  });
+  return out.sort().join('|');
+}
+
+(function substituteTest() {
+  const t = midTournament(15, 2, 4, 77);
+  const before = snapshotPlayed(t);
+  const victim = t.players.find(function (p) {
+    return t.schedule.some(function (r) {
+      return r.games.some(function (g) {
+        return !Model.isGameComplete(g) && g.teamA.concat(g.teamB).indexOf(p.id) !== -1;
+      });
+    });
+  });
+
+  const result = Roster.substitute(t, victim.id, 'Late Arrival');
+  check('substitution succeeds', result.ok === true, result.error);
+  check('the replacement joins the roster', t.players.length === 16);
+  check('the original is marked out', victim.withdrawn === true);
+  check('played games are untouched by a substitution', snapshotPlayed(t) === before);
+  check('the replacement inherited games', result.gamesTaken > 0);
+
+  // The original must not appear in anything still to be played.
+  let futureAppearances = 0;
+  t.schedule.forEach(function (r) {
+    r.games.forEach(function (g) {
+      if (!Model.isGameComplete(g) && g.teamA.concat(g.teamB).indexOf(victim.id) !== -1) futureAppearances += 1;
+    });
+  });
+  check('the original has no unplayed games left', futureAppearances === 0);
+
+  // Their record from games actually played survives in the standings.
+  const row = Standings.compute(t).find(function (r) { return r.playerId === victim.id; });
+  check('the original keeps their played record', row.gp > 0);
+
+  check('a nameless substitute is rejected', Roster.substitute(t, victim.id, '  ').ok === false);
+  check('a duplicate name is rejected', Roster.substitute(t, t.players[0].id, 'Late Arrival').ok === false);
+  check('an unknown player is rejected', Roster.substitute(t, 'nope', 'Someone').ok === false);
+})();
+
+(function withdrawTest() {
+  const t = midTournament(15, 2, 4, 91);
+  const before = snapshotPlayed(t);
+  const totalRounds = t.schedule.length;
+  const victim = t.players[3];
+
+  const result = Roster.withdraw(t, victim.id);
+  check('withdrawal succeeds', result.ok === true, result.error);
+  check('played games survive a withdrawal', snapshotPlayed(t) === before);
+  check('the round count is unchanged', t.schedule.length === totalRounds);
+  check('rounds were actually redrawn', result.redrawnRounds > 0);
+  check('the player is marked out', victim.withdrawn === true);
+
+  let appearances = 0;
+  t.schedule.forEach(function (r) {
+    r.games.forEach(function (g) {
+      if (!Model.isGameComplete(g) && g.teamA.concat(g.teamB).indexOf(victim.id) !== -1) appearances += 1;
+    });
+  });
+  check('they appear in no unplayed game', appearances === 0);
+
+  // Every redrawn game must still be a legal four-player game.
+  let malformed = 0;
+  t.schedule.forEach(function (r) {
+    r.games.forEach(function (g) {
+      const ids = g.teamA.concat(g.teamB);
+      if (ids.length !== 4 || new Set(ids).size !== 4) malformed += 1;
+    });
+    const playing = [];
+    r.games.forEach(function (g) { playing.push.apply(playing, g.teamA.concat(g.teamB)); });
+    check('nobody is double-booked after a redraw', new Set(playing).size === playing.length);
+  });
+  check('every game still has four distinct players', malformed === 0);
+
+  // The redraw continues the history rather than starting fresh.
+  const active = Roster.activePlayers(t).map(function (p) { return p.id; });
+  const q = Scheduler.scheduleQuality(t.schedule, active);
+  check('the redraw still avoids repeat partners', q.maxPartnerRepeats <= 1,
+    'a pair partnered ' + q.maxPartnerRepeats + ' times');
+
+  check('a withdrawn player is not offered a finals place',
+    Roster.eligibleForFinals(t, Standings.compute(t))
+      .every(function (r) { return r.playerId !== victim.id; }));
+})();
+
+(function withdrawGuardTest() {
+  // Dropping below the minimum has to be refused, not attempted.
+  const t = midTournament(6, 1, 2, 55);
+  const before = t.schedule.length;
+  const result = Roster.withdraw(t, t.players[0].id);
+  check('withdrawing below the minimum is refused', result.ok === false);
+  check('a refused withdrawal changes nothing', t.schedule.length === before);
+  check('a refused withdrawal leaves the player active', !t.players[0].withdrawn);
+
+  // Withdrawing a finalist must clear a finals built around them.
+  const t2 = midTournament(12, 2, 8, 44);
+  Demo.fill(t2, {});
+  const top4 = Standings.compute(t2).slice(0, 4).map(function (r) { return r.playerId; });
+  t2.finals = Finals.start(top4);
+  const r2 = Roster.withdraw(t2, top4[1]);
+  check('withdrawing a finalist is allowed', r2.ok === true, r2.error);
+  check('a finals containing them is cleared', t2.finals === null);
+})();
+
+/* ------------------------------------------------------------------ report */
+
+if (failures.length) {
+  console.error('FAILED ' + failures.length + ' check(s):');
+  failures.forEach(function (f) { console.error('  ✗ ' + f); });
+  console.error(passed + ' passed.');
+  process.exit(1);
+}
+console.log('✓ all ' + passed + ' checks passed');
