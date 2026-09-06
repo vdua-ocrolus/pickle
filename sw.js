@@ -6,9 +6,9 @@
  * worse than no signal, and a network-first strategy would stall on it — so a
  * new version only reaches people when this string changes.
  */
-const CACHE_VERSION = 'v6';
+const CACHE_VERSION = 'v7';
 
-/* PRECACHE_FINGERPRINT: fbf380650df31cb0
+/* PRECACHE_FINGERPRINT: 548f6c435096130d
    A hash of every precached file, checked by the test suite. When it no longer
    matches, the cached files have changed and CACHE_VERSION must be bumped —
    otherwise returning devices keep serving the old app forever. */

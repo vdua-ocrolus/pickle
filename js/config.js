@@ -10,6 +10,11 @@
  * README.md under "Live sharing".
  */
 window.AppConfig = {
+  // Shown in the footer so it is possible to tell at a glance whether a phone
+  // is running the current build or a stale cached one. Must match
+  // CACHE_VERSION in sw.js — the test suite enforces that.
+  APP_VERSION: 'v7',
+
   // e.g. 'https://your-project-default-rtdb.firebaseio.com'
   DATABASE_URL: '',
 

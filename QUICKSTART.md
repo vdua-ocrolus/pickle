@@ -103,9 +103,20 @@ not have ended 8–6 when you play to 9. Type the real final score.
 | Want a safety net mid-event | **Data** → **Save**. Creates a restore point you can return to. |
 | Someone doesn't show up | Before you generate the schedule, just remove them on **Setup**. |
 | Someone is injured mid-game | **Setup** → **Someone dropped out?** → pick them → **Substitute** if someone takes their place, **Withdraw** if not. Scores already entered are safe either way. |
+| QR shows standings but no game scores | The **scoring** phone is on an old cached version. Check the version in its footer, then force it to update (see below). The code's contents are set by the phone that makes it, so refreshing the viewer cannot help. |
 | A player's scan shows a blank page | Their phone never loaded the app and has no signal. They need to open the link once with a connection. |
 
 ---
+
+## Making sure a phone is up to date
+
+The footer shows the app version, next to "Works offline". If it does not match what you
+expect, that phone is serving an old cached copy.
+
+To force an update: open the site **in Safari or Chrome** (not the home-screen icon),
+pull down to refresh, and check the version. Then close the home-screen app completely —
+swipe it away from the app switcher — and reopen it. Do **not** clear browser data; that
+would erase your scores.
 
 ## Want to practise first?
 

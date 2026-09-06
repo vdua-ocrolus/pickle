@@ -660,6 +660,12 @@ check('the two draws are named for their levels',
   const fingerprint = hash.digest('hex').slice(0, 16);
   const recorded = (sw.match(/PRECACHE_FINGERPRINT:\s*([a-f0-9]+)/) || [])[1];
 
+  // The footer version is only useful if it cannot drift from the real cache.
+  const config = fs.readFileSync(path.join(root, 'js', 'config.js'), 'utf8');
+  const appVersion = (config.match(/APP_VERSION:\s*'([^']+)'/) || [])[1];
+  check('the displayed version matches the cache version', appVersion === version,
+    'footer says ' + appVersion + ', cache is ' + version);
+
   check('the cached files match the recorded fingerprint',
     fingerprint === recorded,
     'files changed. Bump CACHE_VERSION (now ' + version +

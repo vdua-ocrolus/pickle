@@ -199,6 +199,12 @@ signal at a court is worse than none, and a network-first strategy would stall o
 **bump `CACHE_VERSION` in `sw.js` whenever a cached file changes**, or returning devices
 keep the old version.
 
+The footer shows `APP_VERSION` from `js/config.js`, which the test suite pins to
+`CACHE_VERSION`, so it is possible to tell from the screen whether a device is running
+the current build or a stale cached one. That matters most for QR sharing: a code's
+contents are produced by the organiser's phone, so a stale organiser makes a stale code
+no amount of refreshing on the viewer can fix.
+
 Forgetting that is silent and easy — the deploy succeeds, and only devices that already
 have the app are stuck. The test suite therefore hashes every precached file and compares
 it against `PRECACHE_FINGERPRINT` in `sw.js`. Change a cached file and the tests fail with

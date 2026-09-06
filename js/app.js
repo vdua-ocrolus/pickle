@@ -1580,7 +1580,15 @@
     return startAdmin();
   }
 
+  function showVersion() {
+    const node = document.getElementById('versionNote');
+    if (node && window.AppConfig && window.AppConfig.APP_VERSION) {
+      node.textContent = window.AppConfig.APP_VERSION;
+    }
+  }
+
   function startAdmin() {
+    showVersion();
     state = migrate(window.Storage.load());
     document.getElementById('storageNote').textContent = window.Storage.describe();
     document.getElementById('exportBtn').addEventListener('click', exportJson);
