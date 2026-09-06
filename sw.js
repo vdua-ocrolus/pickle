@@ -6,7 +6,12 @@
  * worse than no signal, and a network-first strategy would stall on it — so a
  * new version only reaches people when this string changes.
  */
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v4';
+
+/* PRECACHE_FINGERPRINT: 1bf8ede761d5bfea
+   A hash of every precached file, checked by the test suite. When it no longer
+   matches, the cached files have changed and CACHE_VERSION must be bumped —
+   otherwise returning devices keep serving the old app forever. */
 const CACHE_NAME = 'pickleball-' + CACHE_VERSION;
 
 const PRECACHE = [

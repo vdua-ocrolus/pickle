@@ -162,6 +162,13 @@ signal at a court is worse than none, and a network-first strategy would stall o
 **bump `CACHE_VERSION` in `sw.js` whenever a cached file changes**, or returning devices
 keep the old version.
 
+Forgetting that is silent and easy — the deploy succeeds, and only devices that already
+have the app are stuck. The test suite therefore hashes every precached file and compares
+it against `PRECACHE_FINGERPRINT` in `sw.js`. Change a cached file and the tests fail with
+the new fingerprint to paste in, which forces the version bump to be a conscious step. The
+same check asserts every `<script>` in `index.html` is actually in the precache list, since
+one that is not would break offline use.
+
 ### Defaults
 
 | Setting | Default | Range |

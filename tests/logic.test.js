@@ -532,6 +532,55 @@ check('the two draws are named for their levels',
   check('the default target is five', Model.DEFAULT_SETTINGS.gamesPerPlayer === 5);
 })();
 
+/* ------------------------------------------------- offline cache freshness */
+
+// sw.js serves cache-first, so a changed file that ships without a new
+// CACHE_VERSION never reaches a device that already has the app. That is easy
+// to forget and invisible when it happens, so it is checked here instead.
+(function cacheVersionTest() {
+  const fs = require('fs');
+  const path = require('path');
+  const crypto = require('crypto');
+  const root = path.join(__dirname, '..');
+
+  const sw = fs.readFileSync(path.join(root, 'sw.js'), 'utf8');
+  const version = (sw.match(/CACHE_VERSION\s*=\s*'([^']+)'/) || [])[1];
+  check('sw.js declares a cache version', !!version);
+
+  const listed = (sw.match(/const PRECACHE = \[([\s\S]*?)\];/) || [])[1] || '';
+  const files = listed.split('\n')
+    .map(function (line) { return (line.match(/'([^']+)'/) || [])[1]; })
+    .filter(Boolean)
+    .map(function (f) { return f === './' ? 'index.html' : f; });
+
+  check('the precache list is not empty', files.length > 5, files.length + ' entries');
+
+  const missing = files.filter(function (f) { return !fs.existsSync(path.join(root, f)); });
+  check('every precached file exists', missing.length === 0, 'missing: ' + missing.join(', '));
+
+  // Anything the app loads at runtime must also be precached, or it breaks offline.
+  const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+  const scripts = [];
+  const re = /<script src="([^"]+)"/g;
+  let m;
+  while ((m = re.exec(html))) scripts.push(m[1]);
+  const unlisted = scripts.filter(function (src) { return files.indexOf(src) === -1; });
+  check('every script tag is precached', unlisted.length === 0, 'not cached: ' + unlisted.join(', '));
+
+  const hash = crypto.createHash('sha256');
+  files.slice().sort().forEach(function (f) {
+    hash.update(f);
+    hash.update(fs.readFileSync(path.join(root, f)));
+  });
+  const fingerprint = hash.digest('hex').slice(0, 16);
+  const recorded = (sw.match(/PRECACHE_FINGERPRINT:\s*([a-f0-9]+)/) || [])[1];
+
+  check('the cached files match the recorded fingerprint',
+    fingerprint === recorded,
+    'files changed. Bump CACHE_VERSION (now ' + version +
+    ') and set PRECACHE_FINGERPRINT to ' + fingerprint);
+})();
+
 /* ------------------------------------------------------------------ report */
 
 if (failures.length) {
