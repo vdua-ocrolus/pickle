@@ -54,6 +54,30 @@ The two tabs at the top are fully independent tournaments — separate rosters, 
 schedules and results. They start named **Advanced** and **Intermediate**; rename either
 on its Setup tab.
 
+## When someone drops out
+
+No-shows and injuries are normal, and once scores are in, rebuilding the draw is not an
+acceptable answer. **Setup → Someone dropped out?** appears as soon as a schedule exists
+and offers two moves. Both hold the same line: **a game that has been played is never
+altered.**
+
+**Substitute** — a replacement takes over the player's remaining games. Pairings do not
+move, so this is safe between rounds. The original keeps the games they actually played
+and stays in the standings marked `out`; the replacement inherits only what had not
+started.
+
+**Withdraw** — nobody replaces them. Rounds already under way are kept; every round that
+had not started is redrawn without them, keeping the **same number of rounds** so the
+day's timing does not shift. The redraw continues the existing partner and sit-out history
+rather than starting fresh, so it still avoids repeat partners. An unplayed game they were
+already slotted into cannot be played three-a-side, so it is dropped and those three sit
+that round out.
+
+Either way a withdrawn player is excluded from the finals seeding — a partial record
+should not put someone on court who has gone home. Withdrawing an existing finalist clears
+the finals so it can be re-seeded. Withdrawal is refused outright if it would drop the
+roster below the minimum or leave too few players to fill a court.
+
 ## On a phone
 
 The layout is built for a phone first, since that is what is in someone's hand at a court.

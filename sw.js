@@ -6,9 +6,9 @@
  * worse than no signal, and a network-first strategy would stall on it — so a
  * new version only reaches people when this string changes.
  */
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 
-/* PRECACHE_FINGERPRINT: 1bf8ede761d5bfea
+/* PRECACHE_FINGERPRINT: a7316947bc2d0720
    A hash of every precached file, checked by the test suite. When it no longer
    matches, the cached files have changed and CACHE_VERSION must be bumped —
    otherwise returning devices keep serving the old app forever. */
@@ -31,6 +31,7 @@ const PRECACHE = [
   'js/finals.js',
   'js/snapshots.js',
   'js/demo.js',
+  'js/roster.js',
   'js/share.js',
   'js/sync.js',
   'js/storage.js',

@@ -267,6 +267,10 @@ textarea { width: 100%; resize: vertical; }
   font-weight: 700;
 }
 .badge.gold { background: var(--ball); color: #2b2b06; }
+.badge.out { background: var(--ink-soft); color: var(--surface); }
+
+.drop-option { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.drop-option h3 { margin: 0; font-size: .95rem; }
 
 .btn.danger { background: var(--error); border-color: var(--error); color: #fff; }
 .grow { flex: 1 1 200px; min-width: 0; }

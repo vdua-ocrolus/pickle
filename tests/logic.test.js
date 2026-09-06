@@ -8,6 +8,7 @@ const Finals = require('../js/finals.js');
 const Snapshots = require('../js/snapshots.js');
 const Demo = require('../js/demo.js');
 const Share = require('../js/share.js');
+const Roster = require('../js/roster.js');
 
 let passed = 0;
 const failures = [];
@@ -579,6 +580,136 @@ check('the two draws are named for their levels',
     fingerprint === recorded,
     'files changed. Bump CACHE_VERSION (now ' + version +
     ') and set PRECACHE_FINGERPRINT to ' + fingerprint);
+})();
+
+/* ---------------------------------------------------- mid-tournament drops */
+
+// The promise: a game that has been played is never altered. Everything else
+// follows from that, so it is what these check hardest.
+function midTournament(n, courts, playedRounds, seed) {
+  const players = roster(n);
+  const settings = { courts: courts, gamesPerPlayer: 5, targetScore: 9, winBy: 1 };
+  const t = {
+    name: 'Drop test', players: players, settings: settings,
+    schedule: Scheduler.generateSchedule(players, settings, seeded(seed)), finals: null,
+  };
+  // Play the first few rounds.
+  t.schedule.slice(0, playedRounds).forEach(function (round) {
+    Demo.fill({ settings: settings, schedule: [round], finals: null }, {}, seeded(seed + 1));
+  });
+  return t;
+}
+
+function snapshotPlayed(t) {
+  const out = [];
+  t.schedule.forEach(function (r) {
+    r.games.forEach(function (g) {
+      if (Model.isGameComplete(g)) {
+        out.push(r.round + ':' + g.teamA.join('+') + 'v' + g.teamB.join('+') + '=' + g.scoreA + '-' + g.scoreB);
+      }
+    });
+  });
+  return out.sort().join('|');
+}
+
+(function substituteTest() {
+  const t = midTournament(15, 2, 4, 77);
+  const before = snapshotPlayed(t);
+  const victim = t.players.find(function (p) {
+    return t.schedule.some(function (r) {
+      return r.games.some(function (g) {
+        return !Model.isGameComplete(g) && g.teamA.concat(g.teamB).indexOf(p.id) !== -1;
+      });
+    });
+  });
+
+  const result = Roster.substitute(t, victim.id, 'Late Arrival');
+  check('substitution succeeds', result.ok === true, result.error);
+  check('the replacement joins the roster', t.players.length === 16);
+  check('the original is marked out', victim.withdrawn === true);
+  check('played games are untouched by a substitution', snapshotPlayed(t) === before);
+  check('the replacement inherited games', result.gamesTaken > 0);
+
+  // The original must not appear in anything still to be played.
+  let futureAppearances = 0;
+  t.schedule.forEach(function (r) {
+    r.games.forEach(function (g) {
+      if (!Model.isGameComplete(g) && g.teamA.concat(g.teamB).indexOf(victim.id) !== -1) futureAppearances += 1;
+    });
+  });
+  check('the original has no unplayed games left', futureAppearances === 0);
+
+  // Their record from games actually played survives in the standings.
+  const row = Standings.compute(t).find(function (r) { return r.playerId === victim.id; });
+  check('the original keeps their played record', row.gp > 0);
+
+  check('a nameless substitute is rejected', Roster.substitute(t, victim.id, '  ').ok === false);
+  check('a duplicate name is rejected', Roster.substitute(t, t.players[0].id, 'Late Arrival').ok === false);
+  check('an unknown player is rejected', Roster.substitute(t, 'nope', 'Someone').ok === false);
+})();
+
+(function withdrawTest() {
+  const t = midTournament(15, 2, 4, 91);
+  const before = snapshotPlayed(t);
+  const totalRounds = t.schedule.length;
+  const victim = t.players[3];
+
+  const result = Roster.withdraw(t, victim.id);
+  check('withdrawal succeeds', result.ok === true, result.error);
+  check('played games survive a withdrawal', snapshotPlayed(t) === before);
+  check('the round count is unchanged', t.schedule.length === totalRounds);
+  check('rounds were actually redrawn', result.redrawnRounds > 0);
+  check('the player is marked out', victim.withdrawn === true);
+
+  let appearances = 0;
+  t.schedule.forEach(function (r) {
+    r.games.forEach(function (g) {
+      if (!Model.isGameComplete(g) && g.teamA.concat(g.teamB).indexOf(victim.id) !== -1) appearances += 1;
+    });
+  });
+  check('they appear in no unplayed game', appearances === 0);
+
+  // Every redrawn game must still be a legal four-player game.
+  let malformed = 0;
+  t.schedule.forEach(function (r) {
+    r.games.forEach(function (g) {
+      const ids = g.teamA.concat(g.teamB);
+      if (ids.length !== 4 || new Set(ids).size !== 4) malformed += 1;
+    });
+    const playing = [];
+    r.games.forEach(function (g) { playing.push.apply(playing, g.teamA.concat(g.teamB)); });
+    check('nobody is double-booked after a redraw', new Set(playing).size === playing.length);
+  });
+  check('every game still has four distinct players', malformed === 0);
+
+  // The redraw continues the history rather than starting fresh.
+  const active = Roster.activePlayers(t).map(function (p) { return p.id; });
+  const q = Scheduler.scheduleQuality(t.schedule, active);
+  check('the redraw still avoids repeat partners', q.maxPartnerRepeats <= 1,
+    'a pair partnered ' + q.maxPartnerRepeats + ' times');
+
+  check('a withdrawn player is not offered a finals place',
+    Roster.eligibleForFinals(t, Standings.compute(t))
+      .every(function (r) { return r.playerId !== victim.id; }));
+})();
+
+(function withdrawGuardTest() {
+  // Dropping below the minimum has to be refused, not attempted.
+  const t = midTournament(6, 1, 2, 55);
+  const before = t.schedule.length;
+  const result = Roster.withdraw(t, t.players[0].id);
+  check('withdrawing below the minimum is refused', result.ok === false);
+  check('a refused withdrawal changes nothing', t.schedule.length === before);
+  check('a refused withdrawal leaves the player active', !t.players[0].withdrawn);
+
+  // Withdrawing a finalist must clear a finals built around them.
+  const t2 = midTournament(12, 2, 8, 44);
+  Demo.fill(t2, {});
+  const top4 = Standings.compute(t2).slice(0, 4).map(function (r) { return r.playerId; });
+  t2.finals = Finals.start(top4);
+  const r2 = Roster.withdraw(t2, top4[1]);
+  check('withdrawing a finalist is allowed', r2.ok === true, r2.error);
+  check('a finals containing them is cleared', t2.finals === null);
 })();
 
 /* ------------------------------------------------------------------ report */

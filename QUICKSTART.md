@@ -101,6 +101,8 @@ not have ended 8–6 when you play to 9. Type the real final score.
 | Want different pairings | **Setup** → **Regenerate schedule**. Erases scores already entered. |
 | Scores are a mess | **Schedule** → **Clear all scores** keeps the pairings. **Setup** → **Reset tournament** starts fresh. |
 | Want a safety net mid-event | **Data** → **Save**. Creates a restore point you can return to. |
+| Someone doesn't show up | Before you generate the schedule, just remove them on **Setup**. |
+| Someone is injured mid-game | **Setup** → **Someone dropped out?** → pick them → **Substitute** if someone takes their place, **Withdraw** if not. Scores already entered are safe either way. |
 | A player's scan shows a blank page | Their phone never loaded the app and has no signal. They need to open the link once with a connection. |
 
 ---

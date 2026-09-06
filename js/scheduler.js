@@ -101,13 +101,36 @@
     };
   }
 
+  /* Replays existing rounds so a later draw knows who has already partnered,
+     faced, or sat out — needed when rounds are added to a schedule already in
+     progress rather than drawn from nothing. */
+  function buildHistory(rounds, playerIds) {
+    const partners = {};
+    const opponents = {};
+    const byeCount = {};
+    playerIds.forEach(function (id) { byeCount[id] = 0; });
+
+    (rounds || []).forEach(function (round) {
+      (round.byes || []).forEach(function (id) {
+        if (byeCount[id] !== undefined) byeCount[id] += 1;
+      });
+      round.games.forEach(function (g) {
+        bump(partners, g.teamA[0], g.teamA[1]);
+        bump(partners, g.teamB[0], g.teamB[1]);
+        for (let i = 0; i < 2; i++) {
+          for (let j = 0; j < 2; j++) bump(opponents, g.teamA[i], g.teamB[j]);
+        }
+      });
+    });
+    return { partners: partners, opponents: opponents, byeCount: byeCount };
+  }
+
   /**
-   * Builds the full round-robin schedule up front.
-   * @param {Array} players  roster objects with { id, name }
-   * @param {Object} settings { courts, gamesPerPlayer } (or a legacy { rounds })
-   * @param {Function} [rand] injectable RNG for deterministic tests
+   * Draws `extraRounds` more rounds for `players`, continuing on from whatever
+   * `existing` rounds have already happened. Used both to build a schedule from
+   * scratch and to redraw the rest of one after the roster changes.
    */
-  function generateSchedule(players, settings, rand) {
+  function extendSchedule(players, settings, existing, extraRounds, startRound, rand) {
     const random = rand || Math.random;
     const playerIds = players.map(function (p) { return p.id; });
     const perRound = Model.gamesPerRound(playerIds.length, settings.courts);
@@ -115,14 +138,14 @@
       throw new Error('Not enough players for a game on the courts available.');
     }
 
-    const partners = {};
-    const opponents = {};
-    const byeCount = {};
-    playerIds.forEach(function (id) { byeCount[id] = 0; });
+    const history = buildHistory(existing, playerIds);
+    const partners = history.partners;
+    const opponents = history.opponents;
+    const byeCount = history.byeCount;
 
-    const rounds = Model.resolveRounds(playerIds.length, settings);
     const schedule = [];
-    for (let r = 1; r <= rounds; r++) {
+    const first = startRound || 1;
+    for (let r = first; r < first + extraRounds; r++) {
       const picked = selectPlaying(playerIds, perRound * 4, byeCount, random);
       picked.byes.forEach(function (id) { byeCount[id] += 1; });
 
@@ -147,6 +170,17 @@
       schedule.push({ round: r, games: games, byes: picked.byes });
     }
     return schedule;
+  }
+
+  /**
+   * Builds the full round-robin schedule up front.
+   * @param {Array} players  roster objects with { id, name }
+   * @param {Object} settings { courts, gamesPerPlayer } (or a legacy { rounds })
+   * @param {Function} [rand] injectable RNG for deterministic tests
+   */
+  function generateSchedule(players, settings, rand) {
+    const rounds = Model.resolveRounds(players.length, settings);
+    return extendSchedule(players, settings, [], rounds, 1, rand);
   }
 
   /* Diagnostics used by the tests and the schedule summary line. */
@@ -179,6 +213,8 @@
 
   return {
     generateSchedule: generateSchedule,
+    extendSchedule: extendSchedule,
+    buildHistory: buildHistory,
     scheduleQuality: scheduleQuality,
     _internals: { pairKey: pairKey, shuffle: shuffle, arrangeGames: arrangeGames },
   };

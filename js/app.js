@@ -174,6 +174,7 @@
           title: 'Remove ' + player.name,
           onclick: function () { removePlayer(t, player.id); },
         }, ['✕']),
+        player.withdrawn ? el('span', { class: 'badge out', text: 'out' }) : null,
       ]));
     });
 
@@ -241,6 +242,9 @@
       rosterError ? el('p', { class: 'notice warn', text: rosterError }) : null,
     ]));
 
+    /* Someone dropped out — only relevant once there is a schedule to protect */
+    if (t.schedule) wrap.appendChild(renderRosterChanges(t));
+
     /* Format settings */
     const maxGames = window.Model.gamesPerRound(t.players.length, t.settings.courts);
     wrap.appendChild(section('Format', [
@@ -298,6 +302,64 @@
 
   /* Spells out what the games-per-player target actually costs, since with more
      players than court space the round count is nothing like the games each. */
+  function renderRosterChanges(t) {
+    const active = window.Roster.activePlayers(t);
+    const pick = el('select', {}, active.map(function (p) {
+      return el('option', { value: p.id }, [p.name]);
+    }));
+    const subName = el('input', { type: 'text', placeholder: 'Replacement name' });
+
+    return section('Someone dropped out?', [
+      el('p', { class: 'muted', text: 'Use these once play has started. Games already ' +
+        'scored are never touched — only the part of the schedule that has not been ' +
+        'played yet changes.' }),
+      field('Player', pick),
+      el('div', { class: 'grid' }, [
+        el('div', { class: 'drop-option' }, [
+          el('h3', { text: 'Someone takes their place' }),
+          el('p', { class: 'muted', text: 'The replacement inherits their remaining games. ' +
+            'The original keeps the games they actually played.' }),
+          subName,
+          el('button', {
+            type: 'button',
+            class: 'btn',
+            onclick: function () {
+              const outgoing = t.players.find(function (p) { return p.id === pick.value; });
+              const result = window.Roster.substitute(t, pick.value, subName.value);
+              if (!result.ok) { toast(result.error, 'error'); return; }
+              save();
+              render();
+              toast(result.player.name + ' takes over ' + result.gamesTaken + ' of ' +
+                outgoing.name + '\u2019s remaining games.', 'ok');
+            },
+          }, ['Substitute']),
+        ]),
+        el('div', { class: 'drop-option' }, [
+          el('h3', { text: 'Nobody replaces them' }),
+          el('p', { class: 'muted', text: 'The rest of the schedule is redrawn without them, ' +
+            'keeping the same number of rounds so the timing does not move.' }),
+          el('button', {
+            type: 'button',
+            class: 'btn danger',
+            onclick: function () {
+              const outgoing = t.players.find(function (p) { return p.id === pick.value; });
+              if (!confirm('Withdraw ' + outgoing.name + '? Played games are kept; the rest ' +
+                'of the schedule is redrawn without them.')) return;
+              const result = window.Roster.withdraw(t, pick.value);
+              if (!result.ok) { toast(result.error, 'error'); return; }
+              save();
+              render();
+              toast(outgoing.name + ' withdrawn. ' + result.keptRounds + ' rounds kept, ' +
+                result.redrawnRounds + ' redrawn' +
+                (result.voidedGames ? ', ' + result.voidedGames + ' unplayed game dropped' : '') +
+                '.', 'ok');
+            },
+          }, ['Withdraw']),
+        ]),
+      ]),
+    ]);
+  }
+
   function formatSummary(t, maxGames) {
     if (t.players.length < window.Model.MIN_PLAYERS) {
       return 'Add players to see what this works out to.';
@@ -609,6 +671,8 @@
 
     const rows = window.Standings.compute(t);
     const progress = window.Standings.roundRobinProgress(t);
+    const withdrawnIds = {};
+    t.players.forEach(function (p) { if (p.withdrawn) withdrawnIds[p.id] = true; });
     const table = el('table', { class: 'table standings' }, [
       el('thead', {}, [el('tr', {}, [
         th('#'), th('Player'), th('GP'), th('W'), th('L'), th('Win %'),
@@ -622,7 +686,9 @@
           td(String(row.rank) + (row.tied ? '=' : '')),
           el('td', { class: 'player-cell' }, [
             row.name,
-            index < 4 ? el('span', { class: 'badge', text: 'finals' }) : null,
+            withdrawnIds[row.playerId] ? el('span', { class: 'badge out', text: 'out' }) : null,
+            index < 4 && !withdrawnIds[row.playerId]
+              ? el('span', { class: 'badge', text: 'finals' }) : null,
           ]),
           td(String(row.gp)),
           td(String(row.w)),
@@ -746,11 +812,12 @@
   }
 
   function renderFinalistPicker(t, progress) {
-    const standings = window.Standings.compute(t);
+    const standings = window.Roster.eligibleForFinals(t, window.Standings.compute(t));
     const seeded = standings.slice(0, 4).map(function (row) { return row.playerId; });
     const selects = [];
 
-    const options = t.players.map(function (p) { return { id: p.id, name: p.name }; });
+    const options = window.Roster.activePlayers(t)
+      .map(function (p) { return { id: p.id, name: p.name }; });
 
     function selectFor(index) {
       const select = el('select', {
