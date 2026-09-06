@@ -401,18 +401,86 @@ check('the two draws are named for their levels',
   const snap = Share.decodeSnapshot(encoded);
   check('a snapshot decodes', snap !== null);
   check('the snapshot carries the name', snap.name === 'Advanced');
-  check('every player is in the snapshot', snap.rows.length === 12);
-  check('progress is carried', snap.done === snap.total && snap.total > 0);
+  check('the snapshot carries every player', snap.tournament.players.length === 12);
 
-  // The snapshot must agree with what the admin sees, or spectators are
-  // reading a different tournament.
+  // Individual game results ride along, not just the finished table.
+  const sentGames = snap.tournament.schedule.reduce(function (n, r) { return n + r.games.length; }, 0);
+  const ownGames = tournament.schedule.reduce(function (n, r) { return n + r.games.length; }, 0);
+  check('every game is carried', sentGames === ownGames, sentGames + ' of ' + ownGames);
+  check('every round is carried', snap.tournament.schedule.length === tournament.schedule.length);
+
+  const sentScores = [];
+  const ownScores = [];
+  snap.tournament.schedule.forEach(function (r) {
+    r.games.forEach(function (g) { sentScores.push(g.scoreA + '-' + g.scoreB); });
+  });
+  tournament.schedule.forEach(function (r) {
+    r.games.forEach(function (g) { ownScores.push(g.scoreA + '-' + g.scoreB); });
+  });
+  check('every score survives the round trip', sentScores.join() === ownScores.join());
+
+  // Pairings have to survive too, or the results read as someone else's games.
+  const sentPairs = [];
+  const ownPairs = [];
+  snap.tournament.schedule.forEach(function (r) {
+    r.games.forEach(function (g) {
+      sentPairs.push(g.teamA.concat(g.teamB).map(function (id) {
+        return snap.tournament.players.find(function (p) { return p.id === id; }).name;
+      }).join('/'));
+    });
+  });
+  tournament.schedule.forEach(function (r) {
+    r.games.forEach(function (g) {
+      ownPairs.push(g.teamA.concat(g.teamB).map(function (id) {
+        return tournament.players.find(function (p) { return p.id === id; }).name;
+      }).join('/'));
+    });
+  });
+  check('every pairing survives the round trip', sentPairs.join() === ownPairs.join());
+
+  // Sit-outs are not transmitted; they are worked out from who is not playing.
+  const sentByes = snap.tournament.schedule.map(function (r) { return r.byes.length; }).join();
+  const ownByes = tournament.schedule.map(function (r) { return r.byes.length; }).join();
+  check('sit-outs are reconstructed correctly', sentByes === ownByes);
+
+  // Standings computed at the viewer must equal the organiser's, exactly.
   const local = Standings.compute(tournament);
-  check('snapshot order matches the standings',
-    snap.rows.map(function (r) { return r.name; }).join() ===
-    local.map(function (r) { return r.name; }).join());
-  check('snapshot records match', snap.rows.every(function (r, i) {
-    return r.w === local[i].w && r.l === local[i].l && r.diff === local[i].diff;
-  }));
+  const remote = Standings.compute(snap.tournament);
+  check('viewer standings match the organiser exactly',
+    JSON.stringify(local.map(function (r) { return [r.name, r.gp, r.w, r.l, r.pf, r.pa, r.byes, r.rank]; })) ===
+    JSON.stringify(remote.map(function (r) { return [r.name, r.gp, r.w, r.l, r.pf, r.pa, r.byes, r.rank]; })));
+
+  // A part-played tournament must round trip too — unscored games stay unscored.
+  const partial = {
+    name: 'Half done', players: players, settings: settings,
+    schedule: Scheduler.generateSchedule(players, settings, seeded(41)), finals: null,
+  };
+  partial.schedule.slice(0, 2).forEach(function (round) {
+    Demo.fill({ settings: settings, schedule: [round], finals: null }, {}, seeded(42));
+  });
+  const partSnap = Share.decodeSnapshot(Share.encodeSnapshot(partial));
+  const doneBefore = Standings.roundRobinProgress(partial);
+  const doneAfter = Standings.roundRobinProgress(partSnap.tournament);
+  check('a part-played snapshot keeps its progress',
+    doneBefore.done === doneAfter.done && doneBefore.total === doneAfter.total,
+    doneBefore.done + '/' + doneBefore.total + ' vs ' + doneAfter.done + '/' + doneAfter.total);
+
+  // The compact form drops the games when a full code would not scan.
+  const compact = Share.decodeSnapshot(Share.encodeSnapshot(tournament, true));
+  check('a compact snapshot decodes', compact !== null && !!compact.legacyRows);
+  check('a compact snapshot still has every player', compact.legacyRows.length === 12);
+  // Compact only has to win where it is actually used: lots of games. For a
+  // small draw the results encoding is so tight that it costs no more than the
+  // finished table, which is why full is the default.
+  const busy = { name: 'Busy', players: roster(24), settings: { courts: 6, gamesPerPlayer: 15, targetScore: 9, winBy: 1 }, finals: null };
+  busy.schedule = Scheduler.generateSchedule(busy.players, busy.settings, seeded(61));
+  Demo.fill(busy, {}, seeded(62));
+  check('compact is smaller when there are many games',
+    Share.encodeSnapshot(busy, true).length < Share.encodeSnapshot(busy).length,
+    Share.encodeSnapshot(busy, true).length + ' vs ' + Share.encodeSnapshot(busy).length);
+  check('even the busiest full snapshot is encodable',
+    Share.encodeSnapshot(busy).length < 2900,
+    Share.encodeSnapshot(busy).length + ' chars');
 
   // A QR has to physically fit, so the worst case matters.
   const big = roster(Model.MAX_PLAYERS).map(function (p, i) {
@@ -429,14 +497,24 @@ check('the two draws are named for their levels',
   const bigEncoded = Share.encodeSnapshot(bigT);
   check('a full 24-player snapshot stays QR-sized', bigEncoded.length < 2000,
     bigEncoded.length + ' chars');
-  check('the big snapshot still decodes', Share.decodeSnapshot(bigEncoded).rows.length === 24);
+  check('the big snapshot still decodes',
+    Share.decodeSnapshot(bigEncoded).tournament.players.length === 24);
 
   // Champions ride along once the finals are done.
   const top4 = Standings.compute(tournament).slice(0, 4).map(function (r) { return r.playerId; });
   tournament.finals = Finals.start(top4);
   Demo.fill(tournament, {}, seeded(35));
   const done = Share.decodeSnapshot(Share.encodeSnapshot(tournament));
-  check('champions are shared once decided', Array.isArray(done.champions) && done.champions.length === 2);
+  const byIdSnap = {};
+  done.tournament.players.forEach(function (p) { byIdSnap[p.id] = p; });
+  check('the finals are carried', done.tournament.finals !== null);
+  check('champions are derivable once decided',
+    Finals.champions(done.tournament.finals, byIdSnap).length === 2);
+  check('the viewer names the same champions',
+    Finals.champions(done.tournament.finals, byIdSnap).map(function (c) { return c.name; }).join() ===
+    Finals.champions(tournament.finals, (function () {
+      const m = {}; tournament.players.forEach(function (p) { m[p.id] = p; }); return m;
+    })()).map(function (c) { return c.name; }).join());
 
   // Bad input must fail softly — a half-scanned QR should not break the page.
   check('garbage decodes to null', Share.decodeSnapshot('!!!!not-base64!!!!') === null);
@@ -444,6 +522,12 @@ check('the two draws are named for their levels',
   check('empty payload decodes to null', Share.decodeSnapshot('') === null);
   check('valid base64 of the wrong thing decodes to null',
     Share.decodeSnapshot(Share.encode64('{\"hello\":1}')) === null);
+  check('a game referencing an unknown player is rejected',
+    Share.decodeSnapshot(Share.encode64(JSON.stringify(
+      { v: 2, n: 'x', p: ['A', 'B', 'C', 'D'], r: [[[0, 1, 2, 99]]] }))) === null);
+  check('a link from the previous format still opens',
+    Share.decodeSnapshot(Share.encode64(JSON.stringify(
+      { v: 1, n: 'Old', d: 1, t: 1, c: null, r: [['Ann', 1, 0, 9, 3, 0]] }))).legacyRows.length === 1);
 
   // URL mode detection drives which app the browser boots into.
   check('a bare url is admin', Share.readMode('').mode === 'admin');

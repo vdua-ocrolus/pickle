@@ -62,8 +62,8 @@ No internet needed for any of this.
 
 **Data** tab → **Show standings QR**.
 
-Hold up the code. People scan it with their phone camera and see the standings. They
-cannot change anything.
+Hold up the code. People scan it with their phone camera and see the standings **and every
+game score, round by round**. They cannot change anything.
 
 It is a snapshot, so show a fresh code after each round.
 

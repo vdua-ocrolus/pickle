@@ -101,11 +101,24 @@ have opposite requirements.
 
 ### QR snapshot — no server, no signal
 
-**Data → Show standings QR.** The standings are packed into the link itself and shown as
-a QR code. A spectator scans it and sees the table. Nothing is sent anywhere, no database
-is involved, and it works in airplane mode.
+**Data → Show standings QR.** The results are packed into the link itself and shown as a
+QR code. A spectator scans it and sees the standings **and every game score, round by
+round**, including who sat out. Nothing is sent anywhere, no database is involved, and it
+works in airplane mode.
 
 It is a snapshot, not a feed: show a fresh code after each round.
+
+The code carries the games themselves — names once, then each game as four player indexes
+and a score — rather than a finished table. Standings, sit-outs and champions are all
+derivable from that, so sending both would spend the bytes twice, and bytes are what
+decide whether a code can be scanned off a phone. It also means the viewer runs the very
+same standings and finals code the organiser's phone runs, so the two tables cannot drift
+apart. A 15-player, 20-game draw comes to about 750 characters — a 101-module code, which
+scans easily.
+
+Where a draw is big enough that the full results would make a code too dense to scan
+(past about 150 modules), it falls back to standings only and says so on screen. Links
+made before results were included still open.
 
 **The one catch:** the link points at this site, so the spectator's phone needs the app
 files. If they have opened the app before, the service worker has them and the scan works

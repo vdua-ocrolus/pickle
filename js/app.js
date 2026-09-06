@@ -1099,6 +1099,20 @@
     node.className = 'share-status ' + status;
   }
 
+  // Past roughly this, a code stops being reliable to scan off a phone screen.
+  const MAX_SCANNABLE_MODULES = 150;
+
+  function qrModules(text) {
+    try {
+      const qr = window.qrcode(0, 'L');
+      qr.addData(text);
+      qr.make();
+      return qr.getModuleCount();
+    } catch (err) {
+      return Infinity; // too much data to encode at all
+    }
+  }
+
   /* Renders a QR into a container. Long snapshot payloads use the lowest error
      correction so the code stays coarse enough to scan off a phone screen. */
   function qrInto(container, text, dense) {
@@ -1163,10 +1177,17 @@
           type: 'button', class: 'btn primary',
           disabled: !t.schedule,
           onclick: function () {
-            const url = window.Share.snapshotUrl(window.location.href, t);
+            // Prefer the full results, but a code nobody can scan is worse than
+            // one carrying less, so fall back if it gets too dense.
+            let url = window.Share.snapshotUrl(window.location.href, t);
+            let note = 'Standings and every game score for ' + t.name + ', as of right now.';
+            if (qrModules(url) > MAX_SCANNABLE_MODULES) {
+              url = window.Share.snapshotUrl(window.location.href, t, true);
+              note = 'Standings for ' + t.name + '. Too many games to fit the ' +
+                'full results in a scannable code.';
+            }
             output.innerHTML = '';
-            output.appendChild(shareResult(url, 'Scan this',
-              'Standings for ' + t.name + ' as of right now.', true));
+            output.appendChild(shareResult(url, 'Scan this', note, true));
           },
         }, [t.schedule ? 'Show standings QR' : 'Generate a schedule first']),
       ]),
@@ -1301,20 +1322,98 @@
       return;
     }
 
-    viewerChrome(snap.name, 'Standings · view only');
+    viewerChrome(snap.name, 'Results · view only');
+    document.getElementById('storageNote').textContent = 'Snapshot · nothing saved';
     const wrap = el('div', { class: 'stack' });
-    if (snap.champions && snap.champions.length === 2) wrap.appendChild(championsCard(snap.champions));
+
+    // A compact code carries only the finished table.
+    if (snap.legacyRows) {
+      if (snap.champions && snap.champions.length === 2) wrap.appendChild(championsCard(snap.champions));
+      wrap.appendChild(el('section', { class: 'card' }, [
+        el('div', { class: 'row spread' }, [
+          el('h2', { text: 'Standings' }),
+          el('span', { class: 'pill', text: snap.done + ' of ' + snap.total + ' games' }),
+        ]),
+        snapshotNote(),
+        viewerStandingsTable(snap.legacyRows, true),
+      ]));
+      host.appendChild(wrap);
+      return;
+    }
+
+    // A full code carries the games, so the same maths the organiser sees runs here.
+    const t = snap.tournament;
+    const rows = window.Standings.compute(t);
+    const progress = window.Standings.roundRobinProgress(t);
+    const byId = playersById(t);
+    if (window.Finals.isComplete(t.finals)) {
+      wrap.appendChild(championsCard(
+        window.Finals.champions(t.finals, byId).map(function (c) { return c.name; })));
+    }
+
     wrap.appendChild(el('section', { class: 'card' }, [
       el('div', { class: 'row spread' }, [
         el('h2', { text: 'Standings' }),
-        el('span', { class: 'pill', text: snap.done + ' of ' + snap.total + ' games' }),
+        el('span', { class: 'pill', text: progress.done + ' of ' + progress.total + ' games' }),
       ]),
-      el('p', { class: 'muted', text: 'A snapshot, not a live feed — scan the code again ' +
-        'for the latest. Top four go to the finals.' }),
-      viewerStandingsTable(snap.rows, true),
+      snapshotNote(),
+      viewerStandingsTable(rows, true),
     ]));
+
+    if (t.finals) {
+      wrap.appendChild(el('section', { class: 'card' }, [
+        el('h2', { text: 'Finals' }),
+        el('div', { class: 'games' }, t.finals.games.map(function (game, i) {
+          return viewerGameCard(t, game, 'Game ' + (i + 1));
+        })),
+      ]));
+    }
+
+    wrap.appendChild(el('section', { class: 'card' }, [
+      el('h2', { text: 'All results' }),
+      el('div', { class: 'stack' }, t.schedule.map(function (round) {
+        const done = round.games.filter(window.Model.isGameComplete).length;
+        return el('div', { class: 'result-round' }, [
+          el('div', { class: 'row spread' }, [
+            el('h3', { text: 'Round ' + round.round }),
+            el('span', { class: 'pill' + (done === round.games.length ? ' done' : ''),
+              text: done + '/' + round.games.length }),
+          ]),
+          el('div', { class: 'games' }, round.games.map(function (game) {
+            return viewerGameCard(t, game, 'Court ' + game.court);
+          })),
+          round.byes.length ? el('p', { class: 'byes' }, [
+            el('strong', { text: 'Sat out: ' }),
+            round.byes.map(function (id) { return nameOf(t, id); }).join(', '),
+          ]) : null,
+        ]);
+      })),
+    ]));
+
     host.appendChild(wrap);
-    document.getElementById('storageNote').textContent = 'Snapshot · nothing saved';
+  }
+
+  function snapshotNote() {
+    return el('p', { class: 'muted', text: 'A snapshot, not a live feed — scan the code ' +
+      'again for the latest. Top four go to the finals.' });
+  }
+
+  function viewerGameCard(t, game, label) {
+    const done = window.Model.isGameComplete(game);
+    return el('div', { class: 'game' + (done ? ' complete' : '') }, [
+      el('span', { class: 'game-label', text: label }),
+      el('div', { class: 'teams' }, [
+        el('div', { class: 'team' + (done && game.scoreA > game.scoreB ? ' winner' : '') }, [
+          el('span', { class: 'team-names', text: game.teamA.map(function (id) { return nameOf(t, id); }).join(' & ') }),
+          el('span', { class: 'score-text', text: done ? String(game.scoreA) : '–' }),
+        ]),
+        el('span', { class: 'vs', text: 'vs' }),
+        el('div', { class: 'team' + (done && game.scoreB > game.scoreA ? ' winner' : '') }, [
+          el('span', { class: 'team-names', text: game.teamB.map(function (id) { return nameOf(t, id); }).join(' & ') }),
+          el('span', { class: 'score-text', text: done ? String(game.scoreB) : '–' }),
+        ]),
+      ]),
+    ]);
   }
 
   /* ---------------------------------------------------------- live viewer */
